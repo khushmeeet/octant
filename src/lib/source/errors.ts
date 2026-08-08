@@ -33,6 +33,13 @@ export interface SourceError {
 	status?: number;
 	/** Epoch ms before which a retry is pointless. Rate limits only. */
 	retryAt?: number;
+	/**
+	 * The address resolved, but to another kind of git object — `Tree` where a
+	 * file was asked for, `Blob` where a directory was. That is a condition a
+	 * screen can act on rather than report: it sends the reader to the screen
+	 * that shows what is actually there.
+	 */
+	objectType?: string;
 	cause?: unknown;
 }
 

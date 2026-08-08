@@ -13,7 +13,7 @@ got to.
 | 1 — GraphQL client | **Done** | 2026-08-07 |
 | 2 — Cache and the Source/Store seams | **Done** | 2026-08-07 |
 | 3 — Tree screen | **Done** | 2026-08-08 |
-| 4 — File and blame | Not started | — |
+| 4 — File and blame | **Done** | 2026-08-08 |
 | 5 — Log | Not started | — |
 | 6 — Refs | Not started | — |
 | 7 — Review | Not started | — |
@@ -553,32 +553,275 @@ null on non-blob entries, carried over from Phase 2.
 
 ---
 
+## Phase 4 — File and blame
+
+**Done when:** open a file you didn't write and understand its history without
+leaving the screen. ✅ — on a stubbed repository, and pinned by tests. The
+live-token qualifier under **Verification** still stands.
+
+### What was built
+
+The screen the tool exists for, and the two things underneath it that had no
+home before: a syntax highlighter and a code viewer.
+
+| File | Role |
+|---|---|
+| `code/tokenize.ts` | the scanner: one line in, four kinds of token out |
+| `code/lang.ts` | the grammars, and what a path or a fence is written in |
+| `code/highlight.ts` | the seam: lazy line states, memoised tokens, `splitLines` |
+| `code/CodeLine.svelte` | one line's tokens, as spans |
+| `code/CodeViewer.svelte` | line numbers, blame gutter, source — virtualised |
+| `code/blame.ts` | blame ranges reconciled onto lines, with runs marked |
+| `code/Code.svelte` | a whole short snippet, for a README's fenced blocks |
+| `file/FileScreen.svelte` | the screen: three resources, verbs, keyboard, panel |
+| `nav/lines.ts` | `#L204` and `#L204-L219`, parsed and formatted |
+| `source/blame.ts` | the `Blame` document and `getBlame` |
+| `routes/[owner]/[name]/blob/[rev]/[...path]/+page.svelte` | a file |
+| `routes/[owner]/[name]/blame/[rev]/[...path]/+page.svelte` | a file, with the gutter |
+
+Reworked: `source/blob.ts` gained the `File` document and `getFile`, and the two
+addresses a blob has now share one reader; `Source` grew from three methods to
+five; `nav/paths.ts` gained `fileHref`/`parseFile` and four link-outs, and
+`blobUrl` became `githubBlobUrl` now that "the blob URL" means ours; `Verb`
+gained `onhover`; `VirtualRows` accepts a `readonly` list and centres a distant
+row; `FileTree` carries the open file; `MdBlocks` renders fences through the new
+highlighter. `SourceError` gained `objectType`, and both screens act on it.
+
+**One round trip from a URL.** `getFile` addresses `rev:path` rather than
+resolving the path to an object ID first. The object ID is permanent and the
+path is not, so the SHA-addressed read is the better cache citizen — but getting
+there costs a tree query before the blob query, and ARCHITECTURE.md §4 does not
+allow a waterfall on the screen people open most. On a commit SHA the key is
+immutable anyway, so a permalink pays the object ID's price. `getBlob(oid)` stays
+for the README, which already holds the ID.
+
+**Blame is a third read and its own address.** It is the most expensive query in
+the app — GitHub walks the file's history for it — so the code is on screen and
+readable while it is still out, and `/blob/…` never asks for it at all.
+
+### Decisions
+
+**The highlighter is ours, not Shiki's or Prism's.** `PLAN.md` names both; this
+is a deliberate departure, for three reasons that compound.
+
+The first is the palette. DESIGN.md §3 spends exactly four colours on syntax —
+keyword, string/literal, comment, call site — and says they sit *under* the
+chrome. A TextMate grammar resolves dozens of scopes that we would then collapse
+into those four, so the mapping table would be larger than the scanner.
+
+The second is decisive: **the viewer is virtualised, and Shiki is not
+incremental.** `codeToTokens` tokenises a whole blob in one blocking pass
+proportional to the file, against a 400ms cold budget and a 16ms warm one. A
+line-based scanner with a carried state does a viewport's worth of work to open a
+20,000-line file, and walks the rest only if you scroll there.
+
+The third is the one Phase 3 already made about Markdown. Shiki's natural output
+is an HTML string and `{@html}`, and ARCHITECTURE.md §11 lists the token in
+browser storage against "XSS is a real risk". Rendering repository contents as
+markup in the document that holds the token makes that risk strictly worse.
+(Shiki *can* return tokens instead — but at that point it is being used as a
+tokeniser, which is the part we are cheapest at.)
+
+It is a subset, and it says so: a grammar it gets wrong is a colour that is
+missing, never a line that is. If it proves too weak in use, `highlighter()` is a
+five-line seam and Shiki's `codeToTokens` satisfies it.
+
+**Line state is one integer, so a file's worth of it is an array of numbers.**
+`embed * 64 + inner` — which grammar is in force, and which multi-line construct
+the line opened inside. That is what makes walking ahead to line 3,000 a pass
+over characters with no allocation, and it is why `scan()` takes an `out` array
+that may be `null`: the same code path computes state alone or state and tokens.
+
+**An unterminated string ends with its line unless the construct really spans
+lines.** A template literal or a docstring sets the carried state; a stray
+apostrophe in a comment-free line does not, or one quote would tint the rest of
+the file. This is also why the Rust grammar has no single-quote string: `&'a str`
+is a lifetime, not a literal.
+
+**The blame gutter is an address, not a toggle.** View and Blame are two things
+you send to someone, so each has a URL, the back button steps between them, and
+the `#L204` survives the trip. It is also how git names them. The cost is a
+second route directory; the alternative was a switch whose state nobody else
+could see.
+
+**Blame is warmed by hovering its verb.** DESIGN.md §5 requires every verb to
+resolve in under 50ms, and a query cannot. The tree's rows already make this
+bargain with hover, so the verb row makes it too — `Verb.onhover`. At a commit
+SHA the gutter is then paid for exactly once, ever.
+
+**A run is not a range.** GraphQL answers blame in ranges, and two adjacent
+ranges can carry the same commit — git splits a hunk when something between them
+changed and changed back. Collapsing on the range would print one author as two;
+`blameByLine` collapses on the commit, which is what DESIGN.md §5 means by
+"authorship reads as blocks".
+
+**The selection tints the source and rules the gutter, rather than tinting the
+row.** A translucent fill painted on a row and again on a `position: sticky`
+child inside it composites twice and bands visibly. So the gutters stay opaque
+and the addressed line's number carries an inset accent rule — which makes the
+selection something other than colour alone, as DESIGN.md §9 asks anyway.
+
+**A revealed row is walked to when it is near and centred when it is not.**
+`VirtualRows` scrolled minimally, which is right for `j` and `k` — one press
+should move the list by one row, not throw it. It is wrong for a link to line
+3,000: the minimal scroll pins that line to the bottom edge with nothing under
+it, and the lines around a line are most of what you followed the link for. So a
+row more than a viewport away is centred instead. The tree gets the same rule and
+never notices, because its cursor only ever moves by one.
+
+**The whole file is measured to fix the column's width.** A virtualised list
+holds only what is on screen, so a horizontally scrolling code column would be as
+wide as the widest line *currently rendered* and would jump as you scrolled past
+a long one. `widestLine()` is one allocation-free pass and it settles the width
+for the file. Tabs are counted to their stop, because this repository is written
+with them.
+
+**`goto(…, { replaceState: true })`, not SvelteKit's `replaceState`.** The
+selection is derived from `page.url.hash` so that there is one answer to "which
+lines are these" and the back button moves it. Shallow routing's `replaceState`
+does not move `page.url`, so the derivation never fired — found by the test for
+shift-extending a range. Replacing rather than pushing is deliberate: addressing
+twenty lines in turn is one step back out of the file, not twenty.
+
+**An address that resolved to the other kind of object is not an error.**
+`SourceError.objectType` carries the typename, and each screen follows it: a tree
+URL naming a file lands on the file screen, and the reverse. Phase 3 left a
+comment promising this; it costs one field and two effects. Telling someone their
+perfectly good URL was wrong is the worse answer.
+
+**A verb that cannot act is still absent.** Blame does not appear on a binary or
+oversized file, because there are no rendered lines for a gutter to sit beside.
+Permalink follows Phase 3's rule unchanged.
+
+**The file screen reads its own directory rather than prefetching it.** The
+sidebar's tree opens the ancestors of the current path and asks for exactly that
+listing, so the two share one request through `settle()`. Reading it as a
+resource costs nothing more than the prefetch did and makes the sidebar's Tree
+count real instead of blank.
+
+**README fences go through the same scanner.** Phase 3 deferred this on the
+grounds that a second implementation would be one to throw away; there is now one
+implementation, and `Code.svelte` is the non-virtualised way in.
+
+### Deliberately deferred
+
+- **No in-app fallback fetch for a large blob.** ARCHITECTURE.md §11 says "fall
+  back to raw URL, then to 'too large'". The raw URL is offered as a link — as
+  the Raw verb and from the stop block — but not fetched: `raw.githubusercontent.com`
+  does not serve CORS for private repositories, so it would work for exactly the
+  files that need it least. The right door is REST `/repos/…/git/blobs/:sha`,
+  which is CORS-enabled and authenticated; it wants `fromRest` and the mutable
+  ETag path, which Phase 7 is already building for the diff.
+- **`getFile` does not also file its content under the blob's object ID.** The
+  response carries the `oid`, so the same bytes could be shared with `getBlob`'s
+  permanent entry and with every other revision where the file did not change.
+  It needs `settle()` to accept a second key, which is a change to the write path
+  and not to a screen. Worth doing when the blob cache has real files in it.
+- **`/` does nothing on the file screen.** DESIGN.md §6 gives it "filter", and on
+  a file that means find-in-file. Phase 9's palette already claims `/` for
+  content search; deciding twice would be deciding wrong once.
+- **The blame gutter links out to github.com for a commit**, like Log. Phase 5
+  makes both internal.
+- **`age` is not selected from the blame query.** It would make a heat gutter
+  possible, and DESIGN.md §8 does not want the decoration. It costs nothing to
+  add if reading blame in anger says otherwise.
+- **"Since your last visit" is three placeholder rows**, as on the Tree screen.
+  Phase 8.
+
+### Verification
+
+`bun run check` (0 errors), `bun run lint` and `bun run build` all pass.
+`bunx playwright test --repeat-each=4` — 128 passed, no flakes. The suite is 32
+tests and runs in about 26 seconds.
+
+Thirteen tests are new, and the phase is in these:
+
+- the screen carries its file, the five verbs `PLAN.md` names, nine numbered
+  lines from a file whose own trailing newline is not a tenth, and a breadcrumb
+  that walks directories and ends on the file;
+- four kinds of token are coloured, a block comment's state survives a line
+  break, and **not one character of the source is changed** — asserted on a
+  tab-indented line, which is the character a template would quietly eat;
+- `#L5` and `#L2-L4` address a line and a range, and the range survives the trip
+  to the blame view of the same file;
+- clicking a line number addresses it and shift-clicking extends it, and two
+  addresses later one step back leaves the file altogether;
+- `j`/`k` move a cursor that starts unset, `enter` addresses the line and `esc`
+  clears it;
+- blame is not fetched by the view that does not show it, and three ranges over
+  two authors collapse into three runs — including the second run of the commit
+  that was already seen further up;
+- hovering the Blame verb warms it, and opening the gutter afterwards costs
+  nothing;
+- markup hands its `<script>` region to another grammar after the tag's `>`,
+  keeps it across a line break, and takes it back on `</script>`;
+- a binary file says so, offers the bytes, and drops the verb it cannot honour;
+- four thousand lines render as a window of under 140 rows, the file says it was
+  truncated, and a link to line 3,000 arrives centred with its neighbours rather
+  than pinned to the bottom edge;
+- a file opens inside the app from the tree now, and hovering one warms it;
+- a tree address that names a file lands on the file screen;
+- a README fence is read by the same scanner as the file screen.
+
+Both themes checked by screenshot at 1440px, along with the blame gutter, the
+binary stop block, and a 400-character line scrolled sideways to confirm both
+gutters stay pinned.
+
+**Still not run against live GitHub.** Two documents are new and neither has met
+a real token: `File`, whose `object(expression:)` on a `Blob` mirrors `Tree`'s
+and should be safe, and `Blame`, which is the one to watch — `Commit.blame(path:)`
+is the most expensive field we have asked for, and how it behaves on a large
+file, and how its `startingLine`/`endingLine` line up against `Blob.text`, are
+both things only a real repository will settle.
+
+---
+
 ## Carried forward
 
 Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
 
-- **Run every document against a real token.** `Repo`, `Tree` and `Blob` are
-  schema-checked by hand and against stubs only. This has been blocking since
-  Phase 2 and is now three documents deep.
-- **Phase 3 is the first checkpoint.** Live with it for a few days before
-  Phase 4, and answer `PLAN.md`'s question: is the right-panel shape right, or
-  does one screen want a different order?
-- **Phase 4** replaces every `blobUrl` link-out with the file screen, and takes
-  over `getBlob` — which already returns `isBinary` and `isTruncated` for the
-  fallbacks `ARCHITECTURE.md` §11 requires.
+- **Run every document against a real token.** `Repo`, `Tree`, `Blob`, `File` and
+  `Blame` are schema-checked by hand and against stubs only. This has been
+  blocking since Phase 2 and is now five documents deep. `Blame` is the one that
+  most needs a real repository: it is the most expensive field we ask for, and
+  how it behaves on a large file — and whether its line numbers line up with
+  `Blob.text` exactly — is not something a stub can answer.
+- **`PLAN.md`'s first checkpoint is still unanswered.** Two screens now share the
+  right panel's three blocks and neither has argued for a different order, but
+  that is an observation from building them rather than from living with them.
+  The question stands: is the shape right, or does one screen want its own?
+- **The highlighter is a subset, and use is what will show where.** It reads the
+  languages listed in `code/lang.ts`, some of them through a neighbour's grammar
+  — Kotlin and Swift through Java's, PHP through C's. Note which files read badly
+  rather than adding grammars speculatively; `highlighter()` is a five-line seam
+  if a real one is ever needed.
+- **A large or binary blob is offered as a link, not fetched.** The honest
+  fallback is REST `/repos/…/git/blobs/:sha`, which is CORS-enabled and
+  authenticated where `raw.githubusercontent.com` is neither for private
+  repositories. It wants `fromRest` and the mutable ETag path, which Phase 7
+  builds for the diff anyway.
+- **`getFile` caches by `rev:path`, not by object ID.** One round trip from a URL
+  was worth more than the permanent key — but the response carries the `oid`, so
+  filing it under both would give a file that did not change between two branches
+  one cache entry instead of two. It needs `settle()` to accept a second key,
+  which is a change to the write path and not to a screen.
 - **Phase 6** extends Permalink to non-default branches, once the ref map makes
-  a commit SHA available for any revision.
+  a commit SHA available for any revision. Both the Tree and File screens hide
+  the verb until then.
 - **The in-memory layer is still not needed.** Phase 2 deferred it until a
   screen could say whether an IDB round trip per navigation is felt. On the Tree
-  screen it is not, at these sizes. Ask again in Phase 5, when the log moves
-  real volume.
+  and File screens it is not, at these sizes. Ask again in Phase 5, when the log
+  moves real volume.
 - **`resource()` has no pagination.** Trees do not need it — GitHub returns
   `Tree.entries` whole, which is why 4,000 rows is a rendering problem and not a
   fetching one. The log and the PR file list do. Decide in Phase 5, before
   Phase 7 needs it too.
 - **Eviction has never run under real pressure.** The ceiling is exercised by
   test; the quota path is not, because a headless browser's quota is enormous.
-  Watch it once the blob cache has real files in it.
-- **The Markdown parser has no test of its own.** It is covered through the
-  README on the Tree screen, which is the only thing that renders one. If Phase 7
-  gives PR descriptions the same renderer, it earns direct tests.
+  Phase 4 is when this starts to matter: file contents are the first thing we
+  cache that is measured in hundreds of kilobytes rather than in rows.
+- **The Markdown parser and the scanner have no tests of their own.** Both are
+  covered through the screens that render them — the README on the Tree screen,
+  and a file on the File screen. That is the right level while each has one
+  caller. If Phase 7 gives PR descriptions the same renderer, or the scanner
+  starts growing grammars, they earn direct tests.

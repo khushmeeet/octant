@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import Markdown from '$lib/md/Markdown.svelte';
-	import { archiveUrl, blobUrl, parentPath, treeHref, type TreeAddress } from '$lib/nav/paths';
+	import {
+		archiveUrl,
+		fileHref,
+		githubBlobUrl,
+		parentPath,
+		treeHref,
+		type TreeAddress
+	} from '$lib/nav/paths';
 	import { ERROR_LABEL, GitHubSource, type TreeEntry } from '$lib/source';
 	import { prefetch } from '$lib/sync/prefetch';
 	import { resource } from '$lib/sync/resource.svelte';
@@ -127,17 +134,13 @@
 		const { entry } = row;
 		return entry.type === 'tree'
 			? treeHref(repo, address.rev, entry.path)
-			: blobUrl(repo, rev, entry.path);
-	}
-
-	/** Files leave the app until Phase 4 builds the screen they belong on. */
-	function leavesApp(row: Row): boolean {
-		return row.kind === 'entry' && row.entry.type === 'blob';
+			: fileHref(repo, address.rev, entry.path);
 	}
 
 	function warm(row: Row): void {
 		if (row.kind === 'up') prefetch(GitHubSource.getTree(repo, rev, parent ?? ''));
 		else if (row.entry.type === 'tree') prefetch(GitHubSource.getTree(repo, rev, row.entry.path));
+		else if (row.entry.type === 'blob') prefetch(GitHubSource.getFile(repo, rev, row.entry.path));
 	}
 
 	/* ----------------------------------------------------------- keyboard -- */
@@ -145,10 +148,7 @@
 	function open(row: Row | undefined): void {
 		if (!row) return;
 		if (row.kind === 'entry' && row.entry.type === 'commit') return;
-
-		const href = hrefFor(row);
-		if (leavesApp(row)) window.open(href, '_blank', 'noopener,noreferrer');
-		else void goto(href);
+		void goto(hrefFor(row));
 	}
 
 	function onKeydown(event: KeyboardEvent): void {
@@ -304,7 +304,20 @@
 		];
 	});
 
-	const failure = $derived(summary.error ?? tree.error);
+	/**
+	 * A tree address that resolved to a file is the file screen's address, not
+	 * an error. `objectType` is how the source says which it was, and following
+	 * it beats telling someone their perfectly good URL was wrong.
+	 */
+	const elsewhere = $derived(tree.error?.objectType === 'Blob');
+
+	$effect(() => {
+		if (elsewhere) void goto(fileHref(repo, address.rev, path));
+	});
+
+	// A screen on its way somewhere else says nothing on the way. Reporting an
+	// address as missing for the frame before it resolves is worse than a blank.
+	const failure = $derived(elsewhere ? null : (summary.error ?? tree.error));
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -425,11 +438,7 @@
 							class:dir
 							aria-current={index === active ? 'true' : undefined}
 							href={hrefFor(item)}
-							target={dir ? undefined : '_blank'}
-							rel={dir ? undefined : 'noopener noreferrer external'}
-							title={dir
-								? item.entry.path
-								: `${item.entry.path} — opens on github.com until Phase 4`}
+							title={item.entry.path}
 							onpointerenter={() => warm(item)}
 							onclick={() => (cursor = index)}
 						>
@@ -468,7 +477,7 @@
 						<p class="note">
 							GitHub sent a prefix of this file, not all of it.
 							<a
-								href={blobUrl(repo, rev, readmeEntry.path)}
+								href={githubBlobUrl(repo, rev, readmeEntry.path)}
 								target="_blank"
 								rel="noopener noreferrer">Read it on github.com</a
 							>.

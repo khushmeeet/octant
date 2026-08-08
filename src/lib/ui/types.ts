@@ -18,6 +18,12 @@ export interface Verb {
 	label: string;
 	onselect?: () => void;
 	href?: string;
+	/**
+	 * Warm whatever this verb will need. A verb whose screen has to fetch
+	 * something cannot meet the 50ms rule on its own; hovering is the moment to
+	 * pay for it, which is the same bargain the tree's rows make.
+	 */
+	onhover?: () => void;
 	/** Leaves the app. Gets `target="_blank"` and a hint in its title. */
 	external?: boolean;
 	title?: string;

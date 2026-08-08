@@ -101,12 +101,15 @@ export async function getTree(
 		};
 	}
 
-	// The expression resolved, but to a file. Worth saying plainly: Phase 3 sends
-	// this to the file screen rather than showing an error at all.
+	// The expression resolved, but to a file. `objectType` says so, and the tree
+	// screen sends the reader to the file screen rather than showing an error
+	// about an address that was perfectly good.
 	if (node.__typename !== 'Tree') {
 		return {
 			ok: false,
-			error: fail('not-found', `${where} is a ${node.__typename.toLowerCase()}, not a directory.`)
+			error: fail('not-found', `${where} is a ${node.__typename.toLowerCase()}, not a directory.`, {
+				objectType: node.__typename
+			})
 		};
 	}
 

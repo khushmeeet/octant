@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { blobUrl, treeHref } from '$lib/nav/paths';
+	import { fileHref, treeHref } from '$lib/nav/paths';
 	import { GitHubSource, type RepoRef, type TreeEntry } from '$lib/source';
 	import { prefetch } from '$lib/sync/prefetch';
 	import { resource } from '$lib/sync/resource.svelte';
@@ -25,9 +25,11 @@
 		depth: number;
 		/** The directory the main screen is showing. */
 		current: string;
+		/** The file the main screen is showing, `''` on a tree. */
+		file?: string;
 	}
 
-	let { repo, rev, hrefRev, entry, depth, current }: Props = $props();
+	let { repo, rev, hrefRev, entry, depth, current, file = '' }: Props = $props();
 
 	const isDir = $derived(entry.type !== 'blob');
 	const onPath = $derived(current === entry.path || current.startsWith(`${entry.path}/`));
@@ -71,14 +73,13 @@
 		</a>
 	{:else}
 		<span class="tw" aria-hidden="true"></span>
-		<!-- The file screen is Phase 4. Until it exists this links out rather
-		     than pretending — ARCHITECTURE.md §1. -->
 		<a
 			class="name"
-			href={blobUrl(repo, rev, entry.path)}
-			title="{entry.path} — opens on github.com until Phase 4"
-			target="_blank"
-			rel="noopener noreferrer external"
+			class:on={file === entry.path}
+			aria-current={file === entry.path ? 'page' : undefined}
+			href={fileHref(repo, hrefRev, entry.path)}
+			title={entry.path}
+			onpointerenter={() => prefetch(GitHubSource.getFile(repo, rev, entry.path))}
 		>
 			{entry.name}
 		</a>
@@ -88,7 +89,7 @@
 {#if open}
 	{#if listing.data}
 		{#each listing.data.entries as child (child.path)}
-			<Self {repo} {rev} {hrefRev} entry={child} depth={depth + 1} {current} />
+			<Self {repo} {rev} {hrefRev} entry={child} depth={depth + 1} {current} {file} />
 		{/each}
 	{:else if listing.error}
 		<p class="hint" style:padding-left="{17 + depth * 11}px">{listing.error.message}</p>

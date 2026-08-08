@@ -19,17 +19,20 @@
 		repo: RepoRef;
 		rev: string;
 		hrefRev: string | null;
+		/** The directory the main screen is showing. */
 		current: string;
+		/** The file the main screen is showing, `''` on a tree. */
+		file?: string;
 	}
 
-	let { repo, rev, hrefRev, current }: Props = $props();
+	let { repo, rev, hrefRev, current, file = '' }: Props = $props();
 
 	const root = resource(() => GitHubSource.getTree(repo, rev, ''));
 </script>
 
 {#if root.data}
 	{#each root.data.entries as entry (entry.path)}
-		<FileTreeNode {repo} {rev} {hrefRev} {entry} depth={0} {current} />
+		<FileTreeNode {repo} {rev} {hrefRev} {entry} depth={0} {current} {file} />
 	{/each}
 {:else if root.error}
 	<p class="hint">{root.error.message}</p>

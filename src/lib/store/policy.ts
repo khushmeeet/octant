@@ -22,6 +22,14 @@ export const FRESHNESS = {
 	repo: 60_000,
 	/** A tree addressed by branch name rather than by SHA. */
 	tree: 30_000,
+	/** A file's contents at a branch. As volatile as the tree that holds it. */
+	file: 30_000,
+	/**
+	 * Blame at a branch. Longer than the file it describes, deliberately: it is
+	 * the most expensive read in the app, and it only moves when the file does —
+	 * so the file's own revalidation is what notices, a beat earlier.
+	 */
+	blame: 120_000,
 	/** The ref → SHA map. */
 	refs: 30_000,
 	/** Pull request state. */

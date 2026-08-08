@@ -17,7 +17,7 @@
 	 * find-in-page and for the focus ring.
 	 */
 	interface Props {
-		items: T[];
+		items: readonly T[];
 		/** Must match the rendered row, or the window drifts. DESIGN.md §4: 32px. */
 		rowHeight?: number;
 		/** Rows rendered beyond each edge, so a fast scroll does not show gaps. */
@@ -96,10 +96,19 @@
 
 		const top = offset + index * rowHeight;
 		const view = viewport.scrollTop;
+		const height = viewport.clientHeight;
 
-		if (top - revealMargin < view) viewport.scrollTop = Math.max(0, top - revealMargin);
-		else if (top + rowHeight > view + viewport.clientHeight) {
-			viewport.scrollTop = top + rowHeight - viewport.clientHeight;
+		// A row near the viewport is brought just inside it, so `j` and `k` walk
+		// rather than jump. A row nowhere near it is a jump already — someone
+		// followed a link to line 3,000 — and the minimal scroll would pin it to
+		// the bottom edge with nothing under it. Centre that one instead, so the
+		// lines that give it its meaning arrive with it.
+		if (top < view - height || top > view + height * 2) {
+			viewport.scrollTop = Math.max(0, top - (height - rowHeight) / 2);
+		} else if (top - revealMargin < view) {
+			viewport.scrollTop = Math.max(0, top - revealMargin);
+		} else if (top + rowHeight > view + height) {
+			viewport.scrollTop = top + rowHeight - height;
 		}
 	});
 
