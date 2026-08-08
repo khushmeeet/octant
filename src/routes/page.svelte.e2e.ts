@@ -78,7 +78,10 @@ const SRC_TREE = {
 	__typename: 'Tree',
 	oid: SRC_OID,
 	entries: [
-		blob('compiler.js', 'src/compiler.js', '3333333333333333333333333333333333333333', 91_000)
+		blob('App.svelte', 'src/App.svelte', 'aaaa111111111111111111111111111111111111', 300),
+		blob('compiler.js', 'src/compiler.js', '3333333333333333333333333333333333333333', 91_000),
+		blob('huge.txt', 'src/huge.txt', '5555555555555555555555555555555555555555', 260_000),
+		blob('logo.png', 'src/logo.png', '6666666666666666666666666666666666666666', 40_000)
 	]
 };
 
@@ -106,6 +109,7 @@ Web development for the *rest of us*.
 <p align="center">a centred logo</p>
 
 \`\`\`sh
+# get started
 bun install
 \`\`\`
 
@@ -122,6 +126,103 @@ bun install
 const BLOBS: Record<string, { text: string; byteSize: number }> = {
 	[README_OID]: { text: README, byteSize: README.length }
 };
+
+/**
+ * One small file that exercises every branch of the scanner the file screen
+ * depends on: a line comment, a string, keywords, a call site, a tab indent,
+ * and a block comment that survives a line break.
+ */
+const COMPILER = [
+	'// the compiler',
+	"import { parse } from './parse.js';",
+	'',
+	'export function compile(source, options = {}) {',
+	'\tconst ast = parse(source);',
+	'\t/* a block',
+	'\t   comment */',
+	'\treturn { ast, options, name: "compiler" };',
+	'}',
+	''
+].join('\n');
+
+/**
+ * Markup that hands two regions to another grammar and takes them back. This
+ * is the intricate half of the scanner: the region has to open after the tag's
+ * `>` rather than at its name, survive the line breaks in between, and close on
+ * a tag the inner grammar knows nothing about.
+ */
+const APP_SVELTE = [
+	'<script lang="ts">',
+	'\tlet count = $state(0);',
+	'</script>',
+	'',
+	'<!-- a comment -->',
+	'<button onclick={() => count++}>{count}</button>',
+	''
+].join('\n');
+
+/** Past any sane render budget, and truncated — both at once, on purpose. */
+const HUGE = Array.from({ length: 4000 }, (_, i) => `line ${i + 1}`).join('\n');
+
+interface FileStub {
+	text: string | null;
+	byteSize: number;
+	oid: string;
+	isBinary?: boolean;
+	isTruncated?: boolean;
+}
+
+/** Keyed by path, because that is how a file screen addresses one. */
+const FILES: Record<string, FileStub> = {
+	'src/App.svelte': {
+		text: APP_SVELTE,
+		byteSize: APP_SVELTE.length,
+		oid: 'aaaa111111111111111111111111111111111111'
+	},
+	'src/compiler.js': {
+		text: COMPILER,
+		byteSize: 91_000,
+		oid: '3333333333333333333333333333333333333333'
+	},
+	'src/huge.txt': {
+		text: HUGE,
+		byteSize: 260_000,
+		oid: '5555555555555555555555555555555555555555',
+		isTruncated: true
+	},
+	'src/logo.png': {
+		text: null,
+		byteSize: 40_000,
+		oid: '6666666666666666666666666666666666666666',
+		isBinary: true
+	}
+};
+
+const OLD = {
+	oid: '7777777777777777777777777777777777777777',
+	abbreviatedOid: '7777777',
+	messageHeadline: 'first cut of the compiler',
+	committedDate: '2021-04-02T09:00:00Z',
+	author: { name: 'Rich Harris', user: { login: 'rich' } }
+};
+
+const NEW = {
+	oid: '8888888888888888888888888888888888888888',
+	abbreviatedOid: '8888888',
+	messageHeadline: 'inline the parser call',
+	committedDate: '2026-07-30T09:00:00Z',
+	author: { name: 'Simon', user: { login: 'simon' } }
+};
+
+/**
+ * Two authors over nine lines, in three ranges — the middle one is the newer
+ * commit, so the gutter has to start a fresh run when the old one comes back.
+ */
+const BLAME_RANGES = [
+	{ startingLine: 1, endingLine: 3, commit: OLD },
+	{ startingLine: 4, endingLine: 5, commit: NEW },
+	{ startingLine: 6, endingLine: 9, commit: OLD }
+];
 
 interface Body {
 	operationName?: string;
@@ -145,6 +246,10 @@ interface Stub {
 	readonly calls: Record<string, number>;
 	/** Tree requests per directory. The cache tests turn on these. */
 	readonly trees: Record<string, number>;
+	/** File requests per path. */
+	readonly files: Record<string, number>;
+	/** Blame requests per path. Blame is the expensive one, so it is counted. */
+	readonly blames: Record<string, number>;
 	/** Replace the handler for one operation mid-test. */
 	on(
 		operation: string,
@@ -159,6 +264,8 @@ interface Stub {
 async function signIn(page: Page): Promise<Stub> {
 	const calls: Record<string, number> = {};
 	const trees: Record<string, number> = {};
+	const files: Record<string, number> = {};
+	const blames: Record<string, number> = {};
 
 	const handlers: Record<string, (route: Route, variables: Record<string, string>) => unknown> = {
 		Viewer: (route) => json(route, { data: { viewer: VIEWER, rateLimit: rateLimit(4999) } }),
@@ -168,8 +275,45 @@ async function signIn(page: Page): Promise<Stub> {
 			// asked for by SHA and by name is the same answer under two keys.
 			const path = (variables.expression ?? '').split(':').slice(1).join(':');
 			trees[path] = (trees[path] ?? 0) + 1;
+			// A path that names a file resolves — to a blob. Which is what lets the
+			// tree screen hand the address to the file screen.
+			const object = TREES[path] ?? (FILES[path] ? { __typename: 'Blob' } : null);
 			return json(route, {
-				data: { repository: { object: TREES[path] ?? null }, rateLimit: rateLimit(4997) }
+				data: { repository: { object }, rateLimit: rateLimit(4997) }
+			});
+		},
+		File: (route, variables) => {
+			const path = (variables.expression ?? '').split(':').slice(1).join(':');
+			files[path] = (files[path] ?? 0) + 1;
+			const found = FILES[path];
+			return json(route, {
+				data: {
+					repository: {
+						object: found
+							? {
+									__typename: 'Blob',
+									oid: found.oid,
+									byteSize: found.byteSize,
+									isBinary: found.isBinary ?? false,
+									isTruncated: found.isTruncated ?? false,
+									text: found.text
+								}
+							: (TREES[path] ?? null) && { __typename: 'Tree' }
+					},
+					rateLimit: rateLimit(4995)
+				}
+			});
+		},
+		Blame: (route, variables) => {
+			const path = variables.path ?? '';
+			blames[path] = (blames[path] ?? 0) + 1;
+			return json(route, {
+				data: {
+					repository: {
+						object: FILES[path] ? { __typename: 'Commit', blame: { ranges: BLAME_RANGES } } : null
+					},
+					rateLimit: rateLimit(4994)
+				}
 			});
 		},
 		Blob: (route, variables) => {
@@ -214,10 +358,17 @@ async function signIn(page: Page): Promise<Stub> {
 	return {
 		calls,
 		trees,
+		files,
+		blames,
 		on(operation, handler) {
 			handlers[operation] = handler;
 		}
 	};
+}
+
+/** The code viewer's rows. Each carries its line number as its id. */
+function line(page: Page, n: number) {
+	return page.locator(`#L${n}`);
 }
 
 /** The listing, as a set of links. Rows are links because they go somewhere. */
@@ -712,6 +863,268 @@ test('permalink re-addresses the tree by SHA, and the SHA is permanent', async (
 
 	// On a permanent address there is nothing left to make permanent.
 	await expect(page.getByRole('link', { name: 'Permalink' })).toHaveCount(0);
+});
+
+/* ------------------------------------------- Phase 4: the file and blame -- */
+
+const COMPILER_JS = '/sveltejs/svelte/blob/HEAD/src/compiler.js';
+
+async function openFile(page: Page, at = COMPILER_JS) {
+	await page.goto(at);
+	await expect(line(page, 1)).toBeVisible();
+}
+
+test('the file screen carries the file, its verbs and its panel', async ({ page }) => {
+	await signIn(page);
+	await openFile(page);
+
+	// The verb row PLAN.md Phase 4 asks for, in order.
+	for (const verb of ['View', 'Blame', 'Log', 'Raw', 'Permalink']) {
+		await expect(page.getByRole('link', { name: verb, exact: true })).toBeVisible();
+	}
+
+	// Nine lines, numbered, with the file's own trailing newline not counted as
+	// a tenth.
+	await expect(page.getByRole('link', { name: 'Line 9' })).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Line 10' })).toHaveCount(0);
+
+	const panel = page.getByRole('complementary', { name: 'Context' });
+	await expect(panel.getByRole('heading').nth(0)).toHaveText('Since your last visit');
+	await expect(panel).toContainText('JavaScript');
+	await expect(panel).toContainText('89 KB');
+	await expect(panel).toContainText('9');
+
+	// The breadcrumb walks directories and ends on the file.
+	await expect(page.getByRole('banner').getByRole('link', { name: 'src' })).toHaveAttribute(
+		'href',
+		'/sveltejs/svelte/tree/HEAD/src'
+	);
+});
+
+test('the source is highlighted, and not one character of it is changed', async ({ page }) => {
+	await signIn(page);
+	await openFile(page);
+
+	// Four kinds, and only four — DESIGN.md §3.
+	await expect(line(page, 1).locator('.cm')).toHaveText('// the compiler');
+	await expect(line(page, 2).locator('.kw').first()).toHaveText('import');
+	await expect(line(page, 2).locator('.str')).toHaveText("'./parse.js'");
+	await expect(line(page, 4).locator('.fn')).toHaveText('compile');
+	await expect(line(page, 8).locator('.str')).toHaveText('"compiler"');
+
+	// The scanner carries its state across the line break: line 7 is inside a
+	// block comment that opened on line 6 and nothing on it opened one.
+	await expect(line(page, 6).locator('.cm')).toHaveText('/* a block');
+	await expect(line(page, 7).locator('.cm')).toHaveText('comment */');
+
+	// Highlighting is a colour over the source, never a rewrite of it. The tab
+	// is the test: it is the one character a template would quietly eat.
+	expect(await line(page, 5).locator('code').textContent()).toBe('\tconst ast = parse(source);');
+	expect(await line(page, 3).locator('code').textContent()).toBe('');
+});
+
+test('a hash addresses a line, and a range', async ({ page }) => {
+	await signIn(page);
+	await openFile(page, `${COMPILER_JS}#L5`);
+
+	await expect(line(page, 5).locator('code')).toHaveClass(/pick/);
+	await expect(line(page, 4).locator('code')).not.toHaveClass(/pick/);
+	await expect(page.getByRole('complementary', { name: 'Context' })).toContainText('L5');
+
+	await page.goto(`${COMPILER_JS}#L2-L4`);
+	await expect(line(page, 2).locator('code')).toHaveClass(/pick/);
+	await expect(line(page, 3).locator('code')).toHaveClass(/pick/);
+	await expect(line(page, 4).locator('code')).toHaveClass(/pick/);
+	await expect(line(page, 5).locator('code')).not.toHaveClass(/pick/);
+
+	// The range survives the trip to the other view of the same file.
+	await page.getByRole('link', { name: 'Blame', exact: true }).click();
+	await expect(page).toHaveURL('/sveltejs/svelte/blame/HEAD/src/compiler.js#L2-L4');
+	await expect(line(page, 3).locator('code')).toHaveClass(/pick/);
+});
+
+test('clicking a line number addresses it, and shift-click extends it', async ({ page }) => {
+	await signIn(page);
+	await openFile(page);
+
+	await page.getByRole('link', { name: 'Line 3' }).click();
+	await expect(page).toHaveURL(`${COMPILER_JS}#L3`);
+
+	await page.getByRole('link', { name: 'Line 6' }).click({ modifiers: ['Shift'] });
+	await expect(page).toHaveURL(`${COMPILER_JS}#L3-L6`);
+	await expect(line(page, 5).locator('code')).toHaveClass(/pick/);
+
+	// Two addresses in, and one step back leaves the file altogether: addressing
+	// lines replaces history rather than piling it up.
+	await page.goBack();
+	await expect(page).toHaveURL('/');
+});
+
+test('j and k move the line cursor and enter addresses it', async ({ page }) => {
+	await signIn(page);
+	await openFile(page);
+
+	// A screen you have just opened claims no line.
+	await expect(page.locator('code.pick, code.at')).toHaveCount(0);
+
+	await page.keyboard.press('j');
+	await expect(line(page, 1).locator('code')).toHaveClass(/at/);
+	await page.keyboard.press('j');
+	await page.keyboard.press('j');
+	await expect(line(page, 3).locator('code')).toHaveClass(/at/);
+	await page.keyboard.press('k');
+	await expect(line(page, 2).locator('code')).toHaveClass(/at/);
+
+	await page.keyboard.press('Enter');
+	await expect(page).toHaveURL(`${COMPILER_JS}#L2`);
+
+	await page.keyboard.press('Escape');
+	await expect(page).toHaveURL(COMPILER_JS);
+});
+
+test('blame is its own address, and repeated commits collapse into runs', async ({ page }) => {
+	const stub = await signIn(page);
+	await openFile(page);
+
+	// Reading a file does not pay for blame. It is the most expensive query in
+	// the app and it only belongs to the address that shows it.
+	expect(stub.blames['src/compiler.js']).toBeUndefined();
+
+	await page.goto('/sveltejs/svelte/blame/HEAD/src/compiler.js');
+	await expect(line(page, 1).locator('.sha')).toHaveText('7777777');
+	await expect(line(page, 1)).toContainText('rich');
+
+	// Lines 2 and 3 share line 1's commit, so they render nothing at all.
+	await expect(line(page, 2).locator('.sha')).toHaveCount(0);
+	await expect(line(page, 3).locator('.sha')).toHaveCount(0);
+
+	// A different commit starts a run...
+	await expect(line(page, 4).locator('.sha')).toHaveText('8888888');
+	await expect(line(page, 4)).toContainText('simon');
+
+	// ...and the first commit coming back starts another, rather than being
+	// swallowed because the same SHA was seen further up.
+	await expect(line(page, 6).locator('.sha')).toHaveText('7777777');
+	expect(stub.blames['src/compiler.js']).toBe(1);
+});
+
+test('hovering the blame verb warms it, so opening the gutter costs nothing', async ({ page }) => {
+	const stub = await signIn(page);
+	await openFile(page);
+
+	await page.getByRole('link', { name: 'Blame', exact: true }).hover();
+	await expect.poll(() => stub.blames['src/compiler.js']).toBe(1);
+
+	await page.getByRole('link', { name: 'Blame', exact: true }).click();
+	await expect(line(page, 1).locator('.sha')).toHaveText('7777777');
+
+	// The gutter it opened was already on disk when it was asked for.
+	expect(stub.blames['src/compiler.js']).toBe(1);
+});
+
+test('markup hands its script region to another grammar, and takes it back', async ({ page }) => {
+	await signIn(page);
+	await openFile(page, '/sveltejs/svelte/blob/HEAD/src/App.svelte');
+
+	// The tag is markup, and the region it opens starts after the `>` — so the
+	// attribute is still an attribute.
+	await expect(line(page, 1).locator('.kw').first()).toHaveText('<script');
+	await expect(line(page, 1).locator('.str')).toHaveText('"ts"');
+
+	// Inside, on a line of its own, JavaScript.
+	await expect(line(page, 2).locator('.kw')).toHaveText('let');
+	await expect(line(page, 2).locator('.fn')).toHaveText('$state');
+
+	// And back out, on a tag the inner grammar knows nothing about.
+	await expect(line(page, 3).locator('.kw')).toHaveText('</script>');
+	await expect(line(page, 5).locator('.cm')).toHaveText('<!-- a comment -->');
+	await expect(line(page, 6).locator('.kw').first()).toHaveText('<button');
+
+	await expect(page.getByRole('complementary', { name: 'Context' })).toContainText('Svelte');
+});
+
+test('a binary file says so, and offers the bytes', async ({ page }) => {
+	await signIn(page);
+	await page.goto('/sveltejs/svelte/blob/HEAD/src/logo.png');
+
+	await expect(page.getByRole('main')).toContainText('This is a binary file');
+	await expect(page.getByRole('main')).toContainText('39 KB');
+	await expect(page.getByRole('link', { name: 'Open the raw bytes' })).toHaveAttribute(
+		'href',
+		'https://raw.githubusercontent.com/sveltejs/svelte/main/src/logo.png'
+	);
+	await expect(line(page, 1)).toHaveCount(0);
+
+	// A verb that cannot act is absent: there are no lines here to attribute.
+	await expect(page.getByRole('link', { name: 'Blame', exact: true })).toHaveCount(0);
+	await expect(page.getByRole('link', { name: 'Raw', exact: true })).toBeVisible();
+});
+
+test('a four thousand line file renders as a window, and says it was cut short', async ({
+	page
+}) => {
+	await signIn(page);
+	await openFile(page, '/sveltejs/svelte/blob/HEAD/src/huge.txt');
+
+	await expect(page.getByRole('status')).toContainText('sent a prefix of this file');
+
+	const rendered = await page.getByRole('link', { name: /^Line \d+$/ }).count();
+	expect(rendered).toBeGreaterThan(2);
+	expect(rendered).toBeLessThan(140);
+	await expect(line(page, 4000)).toHaveCount(0);
+
+	// It virtualises against the page's scroller, like every other list here.
+	await page.getByRole('main').evaluate((el) => el.scrollTo(0, el.scrollHeight));
+	await expect(line(page, 4000)).toBeVisible();
+	await expect(line(page, 1)).toHaveCount(0);
+
+	// A deep link into the middle of it is a jump, not a step, so the line
+	// arrives with the context that gives it its meaning rather than pinned to
+	// the bottom edge of the screen.
+	await page.goto('/sveltejs/svelte/blob/HEAD/src/huge.txt#L3000');
+	await expect(line(page, 3000).locator('code')).toHaveClass(/pick/);
+	await expect(line(page, 2990)).toBeVisible();
+	await expect(line(page, 3010)).toBeVisible();
+});
+
+test('a file opens inside the app now, and hovering one warms it', async ({ page }) => {
+	const stub = await signIn(page);
+
+	// Arrive without the pointer over the listing. Navigating by mouse leaves it
+	// resting wherever the new screen puts a row under it — which warms that row,
+	// correctly, but is not the hover under test here.
+	await page.goto('/sveltejs/svelte/tree/HEAD/src');
+	await expect(listing(page).getByRole('link', { name: 'compiler.js' })).toBeVisible();
+	expect(stub.files['src/compiler.js']).toBeUndefined();
+
+	await listing(page).getByRole('link', { name: 'compiler.js' }).hover();
+	await expect.poll(() => stub.files['src/compiler.js']).toBe(1);
+
+	await listing(page).getByRole('link', { name: 'compiler.js' }).click();
+	await expect(page).toHaveURL(COMPILER_JS);
+	await expect(line(page, 1).locator('.cm')).toHaveText('// the compiler');
+
+	// The screen it opened was already on disk when it was asked for.
+	expect(stub.files['src/compiler.js']).toBe(1);
+});
+
+test('a tree address that names a file lands on the file screen', async ({ page }) => {
+	await signIn(page);
+	await page.goto('/sveltejs/svelte/tree/HEAD/src/compiler.js');
+
+	// The address resolved — just to the other kind of object. Following it
+	// beats telling someone their perfectly good URL was wrong.
+	await expect(page).toHaveURL(COMPILER_JS);
+	await expect(line(page, 1)).toBeVisible();
+});
+
+test('a readme code fence is read by the same scanner as the file screen', async ({ page }) => {
+	await signIn(page);
+	await openRepo(page);
+
+	const main = page.getByRole('main');
+	await expect(main.getByText('bun install')).toBeVisible();
+	await expect(main.locator('pre .cm')).toHaveText('# get started');
 });
 
 test('a branch name with a slash survives the round trip through the URL', async ({ page }) => {

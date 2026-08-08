@@ -31,6 +31,8 @@
 			target={verb.external ? '_blank' : undefined}
 			rel={verb.external ? 'noopener noreferrer external' : undefined}
 			onclick={verb.onselect}
+			onpointerenter={verb.onhover}
+			onfocus={verb.onhover}
 		>
 			{verb.label}
 		</a>
@@ -40,6 +42,8 @@
 			class:on={active === verb.id}
 			title={verb.title}
 			onclick={verb.onselect}
+			onpointerenter={verb.onhover}
+			onfocus={verb.onhover}
 		>
 			{verb.label}
 		</button>

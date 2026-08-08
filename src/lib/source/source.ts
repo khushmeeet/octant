@@ -1,5 +1,6 @@
 import { FRESHNESS, immutableKey, mutableKey, revKey } from '$lib/store';
-import { getBlob, type BlobContent } from './blob';
+import { getBlame, type FileBlame } from './blame';
+import { getBlob, getFile, type BlobContent, type FileContent } from './blob';
 import { getRepo, type RepoSummary } from './repo';
 import { fromQuery, type CacheQuery } from './query';
 import { getTree, type TreeListing } from './tree';
@@ -12,11 +13,11 @@ import type { RepoRef } from './types';
  * `LocalSource` backed by a git sidecar would satisfy the same interface.
  * Everything above this line is pure UI and knows nothing about GitHub.
  *
- * The architecture names nine methods. Three are implemented, and the interface
- * declares three — a method that exists and throws is a worse lie than one that
+ * The architecture names nine methods. Five are implemented, and the interface
+ * declares five — a method that exists and throws is a worse lie than one that
  * is honestly absent, and the compiler is more use when the interface tells the
- * truth. `getLog`, `getBlame`, `getRefs`, `getPulls`, `getDiff` and `compare`
- * arrive with the screens that need them, in Phases 4 through 7.
+ * truth. `getLog`, `getRefs`, `getPulls`, `getDiff` and `compare` arrive with
+ * the screens that need them, in Phases 5 through 7.
  */
 
 export interface Source {
@@ -36,6 +37,16 @@ export interface Source {
 	 * permanent: a blob at a SHA is the definition of immutable.
 	 */
 	getBlob(ref: RepoRef, oid: string): CacheQuery<BlobContent>;
+
+	/**
+	 * A file's contents at a revision and a path, which is what a URL carries.
+	 * One round trip from a deep link, where resolving the path to an object ID
+	 * first would be two.
+	 */
+	getFile(ref: RepoRef, rev: string, path: string): CacheQuery<FileContent>;
+
+	/** Who wrote each line, as runs. The most expensive read in the app. */
+	getBlame(ref: RepoRef, rev: string, path: string): CacheQuery<FileBlame>;
 }
 
 export const GitHubSource: Source = {
@@ -64,6 +75,25 @@ export const GitHubSource: Source = {
 			// window it is handed, so naming one here would only be decoration.
 			key: immutableKey('blob', ref, oid),
 			run: (options) => getBlob(ref, oid, options).then(fromQuery)
+		};
+	},
+
+	getFile(ref, rev, path) {
+		return {
+			// `file:` rather than `blob:`, because this is the same content under a
+			// different address and the two must not collide in the store — one is
+			// keyed by what the bytes are, the other by where they were found.
+			key: revKey('file', ref, rev, path),
+			maxAge: FRESHNESS.file,
+			run: (options) => getFile(ref, rev, path, options).then(fromQuery)
+		};
+	},
+
+	getBlame(ref, rev, path) {
+		return {
+			key: revKey('blame', ref, rev, path),
+			maxAge: FRESHNESS.blame,
+			run: (options) => getBlame(ref, rev, path, options).then(fromQuery)
 		};
 	}
 };

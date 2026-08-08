@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Code from '$lib/code/Code.svelte';
 	import MdInline from './MdInline.svelte';
 	import type { Block } from './parse';
 	import Self from './MdBlocks.svelte';
@@ -19,9 +20,10 @@
 	{:else if block.kind === 'paragraph'}
 		<p><MdInline nodes={block.children} {resolve} /></p>
 	{:else if block.kind === 'code'}
-		<!-- Syntax highlighting is Phase 4, and it arrives for the file screen
-		     first. Until then code reads as code because it is monospaced. -->
-		<pre class="mono"><code>{block.text}</code></pre>
+		<!-- The file screen's highlighter, on the one other surface that renders
+		     source. A fence with no language, or one we do not know, is plain
+		     monospace — which is what it was before. -->
+		<pre class="mono"><Code text={block.text} lang={block.lang} /></pre>
 	{:else if block.kind === 'quote'}
 		<blockquote><Self blocks={block.blocks} {resolve} /></blockquote>
 	{:else if block.kind === 'list'}
@@ -114,15 +116,6 @@
 		font-size: 12px;
 		line-height: 1.6;
 		color: var(--tx);
-	}
-
-	/* Code inside a block is already monospaced by the `pre`; it must not pick
-	   up the inline span's border and fill. */
-	pre code {
-		font: inherit;
-		background: none;
-		border: none;
-		padding: 0;
 	}
 
 	blockquote {
