@@ -37,7 +37,7 @@
 		cursor?: number | null;
 		/** A line number was clicked. `extend` is a shift-click. */
 		onpick?: (line: number, extend: boolean) => void;
-		/** Where a blame entry's commit lives. Phase 5 makes this internal. */
+		/** Where a blame entry's commit lives — the commit screen, since Phase 5. */
 		commitHref?: (oid: string) => string;
 		/** Line to keep in view, 1-based. */
 		reveal?: number | null;
@@ -90,8 +90,6 @@
 						<a
 							class="bl"
 							href={commitHref?.(mark.commit.oid) ?? '#'}
-							target="_blank"
-							rel="noopener noreferrer external"
 							title="{mark.commit.headline} — {blameAuthor(mark.commit)}, {ago(
 								mark.commit.committedDate
 							)} ago"

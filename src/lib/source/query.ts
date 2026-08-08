@@ -42,6 +42,28 @@ export interface CacheQuery<T> {
 	run(options: FetchOptions): Promise<Fetched<T>>;
 }
 
+/**
+ * One page of a walk — PLAN.md Phase 5, which is where pagination stops being
+ * something to decide later.
+ *
+ * A page is a cached value like any other, and its *cursor is part of its
+ * address*: `pages()` asks the source for a query at a cursor and files what
+ * comes back under a key that names it. So walking back down a log you have
+ * already read costs nothing, and the second page of a log at a commit SHA is
+ * as permanent as the first.
+ *
+ * `totalCount` is what lets a screen say how much it is not showing. A list
+ * that ends without saying whether it ended is the dishonest kind of paging.
+ */
+export interface PageOf<T> {
+	items: T[];
+	/** Where the next page starts. `null` when the source cannot say. */
+	endCursor: string | null;
+	hasNextPage: boolean;
+	/** Across every page, not this one. */
+	totalCount: number;
+}
+
 /** GraphQL: always a full answer, never an ETag. */
 export function fromQuery<T>(result: QueryResult<T>): Fetched<T> {
 	if (!result.ok) return result;

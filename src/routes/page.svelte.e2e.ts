@@ -224,9 +224,244 @@ const BLAME_RANGES = [
 	{ startingLine: 6, endingLine: 9, commit: OLD }
 ];
 
+/* ------------------------------------------------------- Phase 5: the log -- */
+
+/** Distinct in their first seven characters, which is all a log ever shows. */
+const sha = (n: number) => n.toString(16).padStart(7, '0') + '0'.repeat(33);
+
+interface HistoryStub {
+	n: number;
+	parents: number[];
+	author: string;
+	headline: string;
+	body: string;
+	/** Which paths a path-scoped history would return this commit for. */
+	touches: string[];
+	additions: number;
+	deletions: number;
+}
+
+/**
+ * Nine commits with a real shape — a merge, a side branch that rejoins, and two
+ * authors — followed by a hundred linear ones so the log has a second page.
+ *
+ * The shape is the point. Lanes only mean anything if something opens one and
+ * something else closes it: 109 is a merge of 108 and 105, and 105 is a side
+ * branch whose parent 104 is also 106's, so lane 1 opens on the first row and
+ * merges back six rows later.
+ */
+const STRUCTURED: Omit<HistoryStub, 'n'>[] = [
+	{
+		parents: [108, 105],
+		author: 'rich',
+		headline: 'merge the parser rewrite',
+		body: '',
+		touches: ['src/App.svelte'],
+		additions: 40,
+		deletions: 12
+	},
+	{
+		parents: [107],
+		author: 'simon',
+		headline: 'inline the parser call',
+		body: 'It was showing up in every profile we took.\n\nCloses #412.',
+		touches: ['src/compiler.js'],
+		additions: 12,
+		deletions: 3
+	},
+	{
+		parents: [106],
+		author: 'rich',
+		headline: 'document the new flag',
+		body: '',
+		touches: ['README.md'],
+		additions: 4,
+		deletions: 0
+	},
+	{
+		parents: [104],
+		author: 'simon',
+		headline: 'make the compiler slow',
+		body: '',
+		touches: ['src/compiler.js'],
+		additions: 900,
+		deletions: 20
+	},
+	{
+		parents: [104],
+		author: 'rich',
+		headline: 'start the parser rewrite',
+		body: '',
+		touches: ['src/App.svelte'],
+		additions: 30,
+		deletions: 8
+	},
+	{
+		parents: [103],
+		author: 'rich',
+		headline: 'tidy the compiler',
+		body: '',
+		touches: ['src/compiler.js'],
+		additions: 6,
+		deletions: 6
+	},
+	{
+		parents: [102],
+		author: 'simon',
+		headline: 'fix a typo in the readme',
+		body: '',
+		touches: ['README.md'],
+		additions: 1,
+		deletions: 1
+	},
+	{
+		parents: [101],
+		author: 'rich',
+		headline: 'first cut of the compiler',
+		body: '',
+		touches: ['src/compiler.js'],
+		additions: 200,
+		deletions: 0
+	},
+	{
+		parents: [100],
+		author: 'rich',
+		headline: 'add the readme',
+		body: '',
+		touches: ['README.md'],
+		additions: 20,
+		deletions: 0
+	}
+];
+
+const HISTORY: HistoryStub[] = [
+	...STRUCTURED.map((commit, i) => ({ ...commit, n: 109 - i })),
+	...Array.from({ length: 100 }, (_, i) => {
+		const n = 100 - i;
+		return {
+			n,
+			parents: n > 1 ? [n - 1] : [],
+			author: 'rich',
+			headline: `groundwork ${n}`,
+			body: '',
+			touches: ['src/App.svelte'],
+			additions: 3,
+			deletions: 1
+		};
+	})
+];
+
+const BY_OID = new Map(HISTORY.map((commit) => [sha(commit.n), commit]));
+
+/** Six lines, two of them added — enough to number both sides against. */
+const COMPILER_PATCH = [
+	'@@ -1,4 +1,5 @@',
+	' // the compiler',
+	"-import { parse } from './parse.js';",
+	"+import { parse } from './parse.js';",
+	"+import { tidy } from './tidy.js';",
+	' ',
+	' export function compile(source, options = {}) {'
+].join('\n');
+
+/** Past any sane render budget, which is the point. */
+const BIG_PATCH = [
+	'@@ -1,2000 +1,2000 @@',
+	...Array.from({ length: 4000 }, (_, i) => (i % 2 === 1 ? '+' : ' ') + `line ${i + 1}`)
+].join('\n');
+
+interface DiffFileStub {
+	filename: string;
+	status: string;
+	additions: number;
+	deletions: number;
+	patch?: string;
+	previous_filename?: string;
+}
+
+const PATCHES: Record<number, DiffFileStub[]> = {
+	// A binary blob beside a readable file: GitHub sends no patch for the first,
+	// and a screen that rendered that as "nothing changed" would be lying.
+	109: [
+		{ filename: 'src/logo.png', status: 'modified', additions: 0, deletions: 0 },
+		{
+			filename: 'src/App.svelte',
+			status: 'renamed',
+			previous_filename: 'src/Old.svelte',
+			additions: 40,
+			deletions: 12,
+			patch: COMPILER_PATCH
+		}
+	],
+	108: [
+		{
+			filename: 'src/compiler.js',
+			status: 'modified',
+			additions: 12,
+			deletions: 3,
+			patch: COMPILER_PATCH
+		}
+	],
+	106: [
+		{
+			filename: 'src/compiler.js',
+			status: 'modified',
+			additions: 900,
+			deletions: 20,
+			patch: BIG_PATCH
+		}
+	]
+};
+
+function logNode(commit: HistoryStub) {
+	return {
+		oid: sha(commit.n),
+		abbreviatedOid: sha(commit.n).slice(0, 7),
+		messageHeadline: commit.headline,
+		messageBody: commit.body,
+		committedDate: new Date(Date.UTC(2026, 0, 1) + commit.n * 3_600_000).toISOString(),
+		additions: commit.additions,
+		deletions: commit.deletions,
+		changedFilesIfAvailable: PATCHES[commit.n]?.length ?? 1,
+		author: {
+			name: commit.author === 'rich' ? 'Rich Harris' : 'Simon',
+			user: { login: commit.author }
+		},
+		parents: { nodes: commit.parents.map((parent) => ({ oid: sha(parent) })) }
+	};
+}
+
+function restCommit(oid: string) {
+	const found = BY_OID.get(oid);
+	const files = found ? (PATCHES[found.n] ?? []) : [];
+
+	return {
+		sha: oid,
+		commit: {
+			message: found ? [found.headline, found.body].filter(Boolean).join('\n\n') : 'a commit',
+			author: {
+				name: found?.author ?? 'Rich Harris',
+				email: 'rich@svelte.dev',
+				date: found
+					? new Date(Date.UTC(2026, 0, 1) + found.n * 3_600_000).toISOString()
+					: '2026-07-01T09:00:00Z'
+			},
+			committer: null
+		},
+		author: { login: found?.author ?? 'rich' },
+		parents: (found?.parents ?? []).map((parent) => ({ sha: sha(parent) })),
+		stats: {
+			additions: found?.additions ?? 0,
+			deletions: found?.deletions ?? 0,
+			total: (found?.additions ?? 0) + (found?.deletions ?? 0)
+		},
+		files
+	};
+}
+
 interface Body {
 	operationName?: string;
-	variables?: Record<string, string>;
+	variables?: Record<string, string | number | null>;
 }
 
 function bodyOf(route: Route): Body {
@@ -250,10 +485,14 @@ interface Stub {
 	readonly files: Record<string, number>;
 	/** Blame requests per path. Blame is the expensive one, so it is counted. */
 	readonly blames: Record<string, number>;
+	/** Log requests per scope path — `''` is the whole repository. */
+	readonly logs: Record<string, number>;
+	/** Commit requests per SHA. The REST read, and the one `enter` depends on. */
+	readonly commits: Record<string, number>;
 	/** Replace the handler for one operation mid-test. */
 	on(
 		operation: string,
-		handler: (route: Route, variables: Record<string, string>) => unknown
+		handler: (route: Route, variables: Record<string, string | number | null>) => unknown
 	): void;
 }
 
@@ -266,14 +505,22 @@ async function signIn(page: Page): Promise<Stub> {
 	const trees: Record<string, number> = {};
 	const files: Record<string, number> = {};
 	const blames: Record<string, number> = {};
+	const logs: Record<string, number> = {};
+	const commits: Record<string, number> = {};
 
-	const handlers: Record<string, (route: Route, variables: Record<string, string>) => unknown> = {
+	const handlers: Record<
+		string,
+		(route: Route, variables: Record<string, string | number | null>) => unknown
+	> = {
 		Viewer: (route) => json(route, { data: { viewer: VIEWER, rateLimit: rateLimit(4999) } }),
 		Repo: (route) => json(route, { data: { repository: REPOSITORY, rateLimit: rateLimit(4998) } }),
 		Tree: (route, variables) => {
 			// `rev:path` — the revision is ignored here on purpose, so a listing
 			// asked for by SHA and by name is the same answer under two keys.
-			const path = (variables.expression ?? '').split(':').slice(1).join(':');
+			const path = String(variables.expression ?? '')
+				.split(':')
+				.slice(1)
+				.join(':');
 			trees[path] = (trees[path] ?? 0) + 1;
 			// A path that names a file resolves — to a blob. Which is what lets the
 			// tree screen hand the address to the file screen.
@@ -283,7 +530,10 @@ async function signIn(page: Page): Promise<Stub> {
 			});
 		},
 		File: (route, variables) => {
-			const path = (variables.expression ?? '').split(':').slice(1).join(':');
+			const path = String(variables.expression ?? '')
+				.split(':')
+				.slice(1)
+				.join(':');
 			files[path] = (files[path] ?? 0) + 1;
 			const found = FILES[path];
 			return json(route, {
@@ -305,7 +555,7 @@ async function signIn(page: Page): Promise<Stub> {
 			});
 		},
 		Blame: (route, variables) => {
-			const path = variables.path ?? '';
+			const path = String(variables.path ?? '');
 			blames[path] = (blames[path] ?? 0) + 1;
 			return json(route, {
 				data: {
@@ -317,7 +567,7 @@ async function signIn(page: Page): Promise<Stub> {
 			});
 		},
 		Blob: (route, variables) => {
-			const found = BLOBS[variables.oid ?? ''];
+			const found = BLOBS[String(variables.oid ?? '')];
 			return json(route, {
 				data: {
 					repository: {
@@ -335,8 +585,52 @@ async function signIn(page: Page): Promise<Stub> {
 					rateLimit: rateLimit(4996)
 				}
 			});
+		},
+		Log: (route, variables) => {
+			const path = variables.path === null ? '' : String(variables.path ?? '');
+			logs[path] = (logs[path] ?? 0) + 1;
+
+			// A path-scoped history is not a slice of the unscoped one: git drops
+			// the commits in between, which is exactly what makes the graph column
+			// have to cope with a list that is no longer a chain.
+			const all = path ? HISTORY.filter((commit) => commit.touches.includes(path)) : HISTORY;
+
+			// The cursor is the index it ended at. GitHub's is opaque; ours only has
+			// to be stable, because what is under test is that a page is *keyed* by
+			// where it starts.
+			const first = Number(variables.first ?? 50);
+			const after = variables.after === null ? null : String(variables.after ?? '');
+			const start = after ? Number(after) + 1 : 0;
+			const slice = all.slice(start, start + first);
+
+			return json(route, {
+				data: {
+					repository: {
+						object: {
+							__typename: 'Commit',
+							history: {
+								totalCount: all.length,
+								pageInfo: {
+									hasNextPage: start + slice.length < all.length,
+									endCursor: slice.length > 0 ? String(start + slice.length - 1) : null
+								},
+								nodes: slice.map(logNode)
+							}
+						}
+					},
+					rateLimit: rateLimit(4993)
+				}
+			});
 		}
 	};
+
+	// One commit and its patches is the only read in the app that is REST, so it
+	// is the only one that does not come through the GraphQL endpoint.
+	await page.route('https://api.github.com/repos/*/*/commits/*', async (route) => {
+		const oid = route.request().url().split('/').pop() ?? '';
+		commits[oid] = (commits[oid] ?? 0) + 1;
+		await json(route, restCommit(oid));
+	});
 
 	await page.route(GRAPHQL, async (route) => {
 		const { operationName = '', variables = {} } = bodyOf(route);
@@ -360,6 +654,8 @@ async function signIn(page: Page): Promise<Stub> {
 		trees,
 		files,
 		blames,
+		logs,
+		commits,
 		on(operation, handler) {
 			handlers[operation] = handler;
 		}
@@ -492,7 +788,10 @@ test('one address is not fetched twice while it is in the air', async ({ page })
 	stub.on('Tree', async (route, variables) => {
 		// Wide enough that the sidebar's read lands while the listing's is out.
 		await new Promise((resolve) => setTimeout(resolve, 500));
-		const path = (variables.expression ?? '').split(':').slice(1).join(':');
+		const path = String(variables.expression ?? '')
+			.split(':')
+			.slice(1)
+			.join(':');
 		await json(route, {
 			data: { repository: { object: TREES[path] ?? null }, rateLimit: rateLimit(4997) }
 		});
@@ -1138,4 +1437,297 @@ test('a branch name with a slash survives the round trip through the URL', async
 	expect(asked).toBeTruthy();
 	expect(stub.trees.src).toBe(1);
 	await expect(page.getByRole('banner').getByText('release/1.0')).toBeVisible();
+});
+
+/* ------------------------------------------------ Phase 5: the log screen -- */
+
+const LOG = '/sveltejs/svelte/log/HEAD';
+const MERGE = sha(109);
+const INLINE = sha(108);
+const SLOW = sha(106);
+
+/** The commit table, as a set of rows you can go and read. */
+function commitLog(page: Page) {
+	return page.getByRole('navigation', { name: 'Commit log' });
+}
+
+function detailPane(page: Page) {
+	return page.getByRole('region', { name: 'Selected commit' });
+}
+
+async function openLog(page: Page, at = LOG) {
+	await page.goto(at);
+	await expect(commitLog(page).getByRole('link').first()).toBeVisible();
+}
+
+test('the log screen carries its commits, its counts and its panel', async ({ page }) => {
+	await signIn(page);
+	await openLog(page);
+
+	const rows = commitLog(page).getByRole('link');
+	await expect(rows.nth(0)).toContainText('merge the parser rewrite');
+	await expect(rows.nth(0)).toContainText(MERGE.slice(0, 7));
+	await expect(rows.nth(1)).toContainText('inline the parser call');
+	await expect(rows.nth(1)).toContainText('simon');
+
+	// The raw counts sit beside the delta bar, so the bar never carries a
+	// meaning on colour alone — DESIGN.md §9.
+	await expect(rows.nth(1)).toContainText('+12');
+	await expect(rows.nth(1)).toContainText('−3');
+
+	// A page is fifty, and the screen says what it is not showing.
+	await expect(page.getByRole('main')).toContainText('50 of 109 commits');
+
+	const panel = page.getByRole('complementary', { name: 'Context' });
+	await expect(panel.getByRole('heading').nth(0)).toHaveText('Since your last visit');
+	await expect(panel.getByRole('heading').nth(1)).toHaveText('About');
+	await expect(panel.getByRole('heading').nth(2)).toHaveText('Open against it');
+	await expect(panel).toContainText('Whole repository');
+	await expect(panel).toContainText('109');
+
+	// The Log nav item is a destination now, and its count is the scope's.
+	const sidebar = page.getByRole('navigation', { name: 'Primary' });
+	await expect(sidebar.getByRole('link', { name: /Log/ })).toBeVisible();
+});
+
+test('the graph opens a lane for a merge and closes it where it rejoins', async ({ page }) => {
+	await signIn(page);
+	await openLog(page);
+
+	// 109 merges 108 and 105, so a second lane opens on the first row...
+	const rows = commitLog(page).getByRole('link');
+	await expect(rows.nth(0).locator('.graph')).toHaveText('●╮');
+
+	// ...carries down beside the spine while 105 is reached...
+	await expect(rows.nth(4).locator('.graph')).toHaveText('│●');
+
+	// ...and closes into 104, which is the parent both sides share.
+	await expect(rows.nth(5).locator('.graph')).toHaveText('●╯');
+
+	// Below the join there is one lane and it stays one lane.
+	await expect(rows.nth(6).locator('.graph')).toHaveText('●');
+});
+
+test('j and k move a selection that starts unset, and the pane fills in two beats', async ({
+	page
+}) => {
+	const stub = await signIn(page);
+	await openLog(page);
+
+	// A screen you have just opened claims none of its rows.
+	await expect(commitLog(page).locator('[aria-current]')).toHaveCount(0);
+	await expect(detailPane(page)).toHaveCount(0);
+
+	await page.keyboard.press('j');
+	await page.keyboard.press('j');
+
+	const rows = commitLog(page).getByRole('link');
+	await expect(rows.nth(1)).toHaveAttribute('aria-current', 'true');
+
+	// The whole message is there immediately: it came with the log query, and
+	// pressing `j` must never blank the screen.
+	await expect(detailPane(page)).toContainText('inline the parser call');
+	await expect(detailPane(page)).toContainText('showing up in every profile');
+
+	// The file list is the second beat, and it is a different read.
+	await expect(detailPane(page).getByRole('link', { name: /src\/compiler\.js/ })).toBeVisible();
+	expect(stub.commits[INLINE]).toBe(1);
+
+	await page.keyboard.press('k');
+	await expect(detailPane(page)).toContainText('merge the parser rewrite');
+});
+
+test('enter opens the diff, and resting on the row already paid for it', async ({ page }) => {
+	const stub = await signIn(page);
+	await openLog(page);
+
+	await page.keyboard.press('j');
+	await page.keyboard.press('j');
+	await expect(detailPane(page).getByRole('link', { name: /src\/compiler\.js/ })).toBeVisible();
+	expect(stub.commits[INLINE]).toBe(1);
+
+	await page.keyboard.press('Enter');
+	await expect(page).toHaveURL(`/sveltejs/svelte/commit/${INLINE}`);
+	await expect(page.getByRole('heading', { name: 'inline the parser call' })).toBeVisible();
+
+	// The screen it opened was already on disk when it was asked for.
+	expect(stub.commits[INLINE]).toBe(1);
+});
+
+test('the diff carries both line numbers, a sign per row and its hunk header', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/sveltejs/svelte/commit/${INLINE}`);
+
+	await expect(page.getByText('@@ -1,4 +1,5 @@')).toBeVisible();
+	await expect(page.getByRole('main')).toContainText('src/compiler.js');
+
+	const removed = page.locator('.lrow.del');
+	const added = page.locator('.lrow.add');
+	await expect(removed).toHaveCount(1);
+	await expect(added).toHaveCount(2);
+	await expect(removed).toContainText("import { parse } from './parse.js';");
+
+	// A removal advances the old side only, an addition the new side only. The
+	// second added line is therefore new line 3 with no old number beside it.
+	await expect(added.nth(1).locator('.new')).toHaveText('3');
+	await expect(added.nth(1).locator('.old')).toHaveText('');
+	await expect(removed.locator('.old')).toHaveText('2');
+
+	// Colour is never the sole carrier — DESIGN.md §9.
+	await expect(added.first().locator('.sign')).toHaveText('+');
+	await expect(removed.locator('.sign')).toHaveText('−');
+});
+
+test('a binary file in a commit says so rather than showing an empty diff', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/sveltejs/svelte/commit/${MERGE}`);
+
+	await expect(page.getByRole('main')).toContainText('Binary file');
+	await expect(page.getByRole('main')).toContainText('src/logo.png');
+
+	// A rename says where it came from, next to the file it became.
+	await expect(page.getByRole('main')).toContainText('src/Old.svelte');
+
+	// Both parents of a merge are reachable, and the panel says there are two.
+	await expect(page.getByRole('link', { name: sha(105).slice(0, 7) })).toBeVisible();
+	await expect(page.getByRole('complementary', { name: 'Context' })).toContainText('Parents');
+});
+
+test('a four thousand line diff renders as a window, not as a diff', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/sveltejs/svelte/commit/${SLOW}`);
+
+	await expect(page.getByText('@@ -1,2000 +1,2000 @@')).toBeVisible();
+
+	const rendered = await page.locator('.lrow').count();
+	expect(rendered).toBeGreaterThan(2);
+	expect(rendered).toBeLessThan(140);
+
+	// It virtualises against the page's scroller, like every other list here.
+	await page.getByRole('main').evaluate((el) => el.scrollTo(0, el.scrollHeight));
+	await expect(page.getByText('line 4000', { exact: true })).toBeVisible();
+});
+
+test('the log scopes to a path, and the total follows the scope', async ({ page }) => {
+	const stub = await signIn(page);
+	await openFile(page);
+
+	// The file screen's Log verb is internal now, and it warms what it opens.
+	await page.getByRole('link', { name: 'Log', exact: true }).hover();
+	await expect.poll(() => stub.logs['src/compiler.js']).toBe(1);
+
+	await page.getByRole('link', { name: 'Log', exact: true }).click();
+	await expect(page).toHaveURL('/sveltejs/svelte/log/HEAD/src/compiler.js');
+
+	// Four commits touched it, out of a hundred and nine.
+	await expect(commitLog(page).getByRole('link')).toHaveCount(4);
+	await expect(page.getByRole('main')).toContainText('4 of 4 commits');
+	await expect(page.getByRole('complementary', { name: 'Context' })).toContainText(
+		'src/compiler.js'
+	);
+
+	// Filtering by path drops the commits in between, so the history is a list
+	// rather than a graph — and it draws itself as one instead of leaking lanes.
+	for (const row of await commitLog(page).getByRole('link').all()) {
+		await expect(row.locator('.graph')).toHaveText('●');
+	}
+
+	// The scope was opened once, and the verb's hover is what paid for it.
+	expect(stub.logs['src/compiler.js']).toBe(1);
+});
+
+test('the sidebar re-scopes the log, and the author filter says what it covers', async ({
+	page
+}) => {
+	await signIn(page);
+	await openLog(page);
+
+	const sidebar = page.getByRole('navigation', { name: 'Primary' });
+
+	// Scope is a segment: it changes the address and the total.
+	await sidebar.getByRole('link', { name: 'README.md' }).click();
+	await expect(page).toHaveURL('/sveltejs/svelte/log/HEAD/README.md');
+	await expect(commitLog(page).getByRole('link')).toHaveCount(3);
+
+	await sidebar.getByRole('link', { name: 'Whole repository' }).click();
+	await expect(page).toHaveURL(LOG);
+
+	// Author is a parameter: it narrows the view of the same address, and it is
+	// honest about reaching only as far as what is loaded.
+	await sidebar.getByRole('link', { name: /simon/ }).click();
+	await expect(page).toHaveURL(`${LOG}?author=simon`);
+	await expect(commitLog(page).getByRole('link')).toHaveCount(3);
+	await expect(page.getByRole('main')).toContainText('3 of 50 loaded · 109 commits');
+	await expect(page.getByRole('banner').getByText('simon')).toBeVisible();
+});
+
+test('a further page is fetched once, and walking back down it is free', async ({ page }) => {
+	const stub = await signIn(page);
+	await openLog(page);
+
+	expect(stub.logs['']).toBe(1);
+	await expect(page.getByRole('main')).toContainText('50 of 109 commits');
+
+	await page.getByRole('button', { name: 'Load more' }).click();
+	await expect(page.getByRole('main')).toContainText('100 of 109 commits');
+	expect(stub.logs['']).toBe(2);
+
+	await page.getByRole('button', { name: 'Load more' }).click();
+	await expect(page.getByRole('main')).toContainText('109 of 109 commits');
+	expect(stub.logs['']).toBe(3);
+	await expect(page.getByRole('button', { name: 'Load more' })).toHaveCount(0);
+
+	// Leave and come back, then walk the whole way down again. The first page is
+	// inside its window and each page behind it is filed under the cursor that
+	// fetched it, so the second walk costs nothing at all.
+	await page.goto('/sveltejs/svelte');
+	await expect(listing(page).getByRole('link', { name: 'README.md' })).toBeVisible();
+	await openLog(page);
+
+	await page.getByRole('button', { name: 'Load more' }).click();
+	await expect(page.getByRole('main')).toContainText('100 of 109 commits');
+	await page.getByRole('button', { name: 'Load more' }).click();
+	await expect(page.getByRole('main')).toContainText('109 of 109 commits');
+
+	expect(stub.logs['']).toBe(3);
+});
+
+test('the blame gutter opens a commit inside the app now', async ({ page }) => {
+	await signIn(page);
+	await page.goto('/sveltejs/svelte/blame/HEAD/src/compiler.js');
+	await expect(line(page, 1).locator('.sha')).toHaveText('7777777');
+
+	// The blame entry, not the line number beside it.
+	await line(page, 1).locator('a.bl').click();
+	await expect(page).toHaveURL('/sveltejs/svelte/commit/7777777777777777777777777777777777777777');
+	await expect(page.getByRole('main')).toContainText('7777777');
+});
+
+test('the write verbs copy the command rather than pretending to write', async ({ page }) => {
+	await signIn(page);
+	await openLog(page);
+
+	// No commit is selected, so the commit's verbs are not there to be pressed.
+	await expect(page.getByRole('button', { name: 'Revert' })).toHaveCount(0);
+
+	await page.keyboard.press('j');
+	await page.getByRole('button', { name: 'Cherry-pick' }).click();
+
+	// The label only flips once the clipboard actually took it.
+	await expect(page.getByRole('button', { name: 'Copied' })).toBeVisible();
+});
+
+test('a commit is permanent, so its diff is never fetched twice', async ({ page }) => {
+	const stub = await signIn(page);
+	await page.goto(`/sveltejs/svelte/commit/${INLINE}`);
+	await expect(page.getByText('@@ -1,4 +1,5 @@')).toBeVisible();
+	expect(stub.commits[INLINE]).toBe(1);
+
+	// A new document, a new store, nothing in memory — and it is addressed by
+	// SHA, so it is immutable however stale everything around it goes.
+	await expireMutable(page);
+	await page.reload();
+	await expect(page.getByText('@@ -1,4 +1,5 @@')).toBeVisible();
+
+	expect(stub.commits[INLINE]).toBe(1);
 });

@@ -10,12 +10,15 @@ export { query, type QueryOptions, type QueryResult } from './graphql';
 export {
 	restGet,
 	compare,
+	commitDetail,
 	pullFiles,
 	comparisonTruncated,
 	COMPARE_FILE_CAP,
+	COMMIT_FILE_CAP,
 	type RestOptions,
 	type RestResult,
 	type Comparison,
+	type CommitResponse,
 	type CompareCommit,
 	type DiffFile
 } from './rest';
@@ -31,5 +34,14 @@ export { getRepo, REPO, type HeadCommit, type RepoSummary } from './repo';
 export { getTree, TREE, type EntryType, type TreeEntry, type TreeListing } from './tree';
 export { getBlob, getFile, BLOB, FILE, type BlobContent, type FileContent } from './blob';
 export { getBlame, BLAME, type BlameCommit, type BlameRange, type FileBlame } from './blame';
-export { fromQuery, fromRest, type CacheQuery, type FetchOptions, type Fetched } from './query';
+export { getLog, logAuthor, LOG, LOG_PAGE_SIZE, type LogCommit, type LogPage } from './log';
+export { getCommit, type ChangedFile, type ChangeStatus, type CommitDetail } from './commit';
+export {
+	fromQuery,
+	fromRest,
+	type CacheQuery,
+	type FetchOptions,
+	type Fetched,
+	type PageOf
+} from './query';
 export { GitHubSource, type Source } from './source';

@@ -1,6 +1,8 @@
 import { FRESHNESS, immutableKey, mutableKey, revKey } from '$lib/store';
 import { getBlame, type FileBlame } from './blame';
 import { getBlob, getFile, type BlobContent, type FileContent } from './blob';
+import { getCommit, type CommitDetail } from './commit';
+import { getLog, type LogPage } from './log';
 import { getRepo, type RepoSummary } from './repo';
 import { fromQuery, type CacheQuery } from './query';
 import { getTree, type TreeListing } from './tree';
@@ -13,11 +15,11 @@ import type { RepoRef } from './types';
  * `LocalSource` backed by a git sidecar would satisfy the same interface.
  * Everything above this line is pure UI and knows nothing about GitHub.
  *
- * The architecture names nine methods. Five are implemented, and the interface
- * declares five — a method that exists and throws is a worse lie than one that
+ * The architecture names nine methods. Seven are implemented, and the interface
+ * declares seven — a method that exists and throws is a worse lie than one that
  * is honestly absent, and the compiler is more use when the interface tells the
- * truth. `getLog`, `getRefs`, `getPulls`, `getDiff` and `compare` arrive with
- * the screens that need them, in Phases 5 through 7.
+ * truth. `getRefs` and `getPulls` arrive with the screens that need them, in
+ * Phases 6 and 7.
  */
 
 export interface Source {
@@ -47,6 +49,19 @@ export interface Source {
 
 	/** Who wrote each line, as runs. The most expensive read in the app. */
 	getBlame(ref: RepoRef, rev: string, path: string): CacheQuery<FileBlame>;
+
+	/**
+	 * One page of history, optionally scoped to a path. The cursor is part of
+	 * the address: a page is filed under where it starts, so walking back down a
+	 * log already read is a local read. `pages()` is what walks these.
+	 */
+	getLog(ref: RepoRef, rev: string, path?: string, after?: string | null): CacheQuery<LogPage>;
+
+	/**
+	 * One commit and everything it touched, patches included. The only read in
+	 * the app that goes over REST, because GraphQL has no patch field.
+	 */
+	getCommit(ref: RepoRef, rev: string): CacheQuery<CommitDetail>;
 }
 
 export const GitHubSource: Source = {
@@ -94,6 +109,30 @@ export const GitHubSource: Source = {
 			key: revKey('blame', ref, rev, path),
 			maxAge: FRESHNESS.blame,
 			run: (options) => getBlame(ref, rev, path, options).then(fromQuery)
+		};
+	},
+
+	getLog(ref, rev, path = '', after = null) {
+		// The cursor goes in the key before the path, because a path may itself
+		// contain a colon and must therefore stay the last segment. `head` names
+		// the first page rather than leaving an empty segment, so a key stays
+		// readable in devtools — which is where the cache is inspected.
+		const page = after ? `after=${after}` : 'head';
+
+		return {
+			key: revKey('log', ref, rev, path ? `${page}:${path}` : page),
+			maxAge: FRESHNESS.log,
+			run: (options) => getLog(ref, rev, path, after, options).then(fromQuery)
+		};
+	},
+
+	getCommit(ref, rev) {
+		return {
+			// A commit named by SHA is the definition of immutable; one named by a
+			// branch moves with it. `revKey` decides, as everywhere else.
+			key: revKey('commit', ref, rev),
+			maxAge: FRESHNESS.commit,
+			run: (options) => getCommit(ref, rev, options)
 		};
 	}
 };

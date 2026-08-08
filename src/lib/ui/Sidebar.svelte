@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { session } from '$lib/auth/token.svelte';
-	import { repoHref } from '$lib/nav/paths';
+	import { logHref, repoHref } from '$lib/nav/paths';
 	import type { RepoSummary } from '$lib/source';
 	import Icon from './Icon.svelte';
 	import { count } from './format';
@@ -12,26 +12,45 @@
 	 * ARCHITECTURE.md §2. Four items, and branches and tags share one screen
 	 * because they are the same object.
 	 *
-	 * Phase 3 replaces Phase 0's local `active` state with the route. Log, Refs
-	 * and Review are rendered but not reachable: their counts are real and come
-	 * from the repository summary we already hold, and the item says plainly
-	 * that the screen is not built rather than linking somewhere that isn't
-	 * there. An honest dead end beats a stub route.
+	 * Phase 3 replaced Phase 0's local `active` state with the route, and Phase 5
+	 * makes Log a real destination. Refs and Review are still rendered but not
+	 * reachable: their counts are real and come from the repository summary we
+	 * already hold, and the item says plainly that the screen is not built rather
+	 * than linking somewhere that isn't there. An honest dead end beats a stub
+	 * route.
 	 */
 	export type NavId = 'tree' | 'log' | 'refs' | 'review';
 
 	interface Props {
 		repo?: RepoSummary | null;
 		active?: NavId;
+		/**
+		 * The revision the nav links carry. `null` addresses the default branch,
+		 * which is what keeps a link correct across a rename.
+		 */
+		rev?: string | null;
 		/** Entries in the directory on screen. The Tree item's count. */
 		treeCount?: number | null;
+		/**
+		 * Commits in the log's current scope, which is not the same number as the
+		 * repository's total once a path narrows it.
+		 */
+		logCount?: number | null;
 		/** Contextual section heading — `Files`, `Symbols`, `Scope`, `Threads`. */
 		section?: string;
 		/** The contextual section's body. */
 		children?: Snippet;
 	}
 
-	let { repo = null, active, treeCount = null, section = 'Files', children }: Props = $props();
+	let {
+		repo = null,
+		active,
+		rev = null,
+		treeCount = null,
+		logCount = null,
+		section = 'Files',
+		children
+	}: Props = $props();
 
 	const viewer = $derived(session.viewer);
 	const initial = $derived((viewer?.login ?? '?').charAt(0).toUpperCase());
@@ -59,8 +78,13 @@
 			id: 'log',
 			label: 'Log',
 			icon: 'commit',
-			count: repo?.counts.commits ?? null,
-			href: null,
+			// The scope's count when a screen knows one, and the repository's
+			// otherwise — the Tree item has worked this way since Phase 3.
+			count: logCount ?? repo?.counts.commits ?? null,
+			// Repository-level, deliberately: a nav item goes to the whole of a
+			// thing. Scoping the log to a path is the verb row's job, and the
+			// sidebar's Scope section's.
+			href: repo ? logHref(repo, rev, '') : null,
 			phase: 5
 		},
 		{

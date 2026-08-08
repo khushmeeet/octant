@@ -7,10 +7,10 @@
 	import { languageOf } from '$lib/code/lang';
 	import { lineHash, parseLines, range, type LineRange } from '$lib/nav/lines';
 	import {
+		commitHref,
 		fileHref,
 		githubBlobUrl,
-		githubCommitUrl,
-		githubHistoryUrl,
+		logHref,
 		parentPath,
 		rawUrl,
 		treeHref,
@@ -218,9 +218,11 @@
 			{
 				id: 'log',
 				label: 'Log',
-				href: githubHistoryUrl(repo, outRev, path),
-				external: true,
-				title: "This file's history on github.com — the Log screen is Phase 5"
+				href: logHref(repo, address.rev, path),
+				title: 'Every commit that touched this file',
+				// The log is a query like blame is, so the verb pays for it on hover
+				// rather than making the row's 50ms promise on credit.
+				onhover: () => prefetch(GitHubSource.getLog(repo, rev, path, null))
 			},
 			{
 				id: 'raw',
@@ -340,6 +342,7 @@
 	<Sidebar
 		repo={summary.data}
 		active="tree"
+		rev={address.rev}
 		treeCount={siblings.data?.entries.length ?? null}
 		section="Files"
 	>
@@ -439,7 +442,7 @@
 				{cursor}
 				{reveal}
 				onpick={select}
-				commitHref={(oid) => githubCommitUrl(repo, oid)}
+				commitHref={(oid) => commitHref(repo, oid)}
 			/>
 		{:else if file.loading}
 			<p class="none">&nbsp;</p>

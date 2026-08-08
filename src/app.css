@@ -89,6 +89,9 @@
 	--pad-panel: 14px;
 	--gutter-ln: 46px;
 	--gutter-blame: 126px;
+	/* A diff carries two of them — old and new — so each is narrower than the
+	   single gutter a file gets, and the pair still costs less than 2×46px. */
+	--gutter-diff: 40px;
 	--col-graph: 46px;
 	--radius-pill: 5px;
 	--radius-item: 5px;
