@@ -14,7 +14,7 @@ got to.
 | 2 — Cache and the Source/Store seams | **Done** | 2026-08-07 |
 | 3 — Tree screen | **Done** | 2026-08-08 |
 | 4 — File and blame | **Done** | 2026-08-08 |
-| 5 — Log | Not started | — |
+| 5 — Log | **Done** | 2026-08-08 |
 | 6 — Refs | Not started | — |
 | 7 — Review | Not started | — |
 | 8 — Since your last visit | Not started | — |
@@ -776,20 +776,225 @@ both things only a real repository will settle.
 
 ---
 
+## Phase 5 — Log
+
+**Done when:** you can answer "when did this file get slow" without opening
+github.com. ✅ — on a stubbed repository, and pinned by tests. The live-token
+qualifier under **Verification** still stands.
+
+### What was built
+
+Two screens, because the answer to "when" is only half the question. The log
+says which commit, and the commit screen says what it did.
+
+| File | Role |
+|---|---|
+| `source/log.ts` | the `Log` document and `getLog` — one page of history |
+| `source/commit.ts` | `getCommit`: one commit and its patches, over REST |
+| `sync/pages.svelte.ts` | `pages()` — a walk, one cached page at a time |
+| `log/graph.ts` | lanes, from parents, as box-drawing characters |
+| `log/authors.ts` | who has been committing, among what is loaded |
+| `log/LogScreen.svelte` | the screen: table, scope, filters, detail pane |
+| `log/Scope.svelte` | the sidebar's `Scope` section — path and author |
+| `log/CommitDetail.svelte` | the selected commit: whole message, touched files |
+| `ui/DeltaBar.svelte` | five cells, and the only graphic in the app |
+| `diff/parse.ts` | unified patches in, hunks and numbered lines out |
+| `diff/DiffView.svelte` | the diff, virtualised, one list across every file |
+| `commit/CommitScreen.svelte` | one commit, its message and its whole diff |
+| `routes/[owner]/[name]/log/[rev]/[...path]/+page.svelte` | history, scoped |
+| `routes/[owner]/[name]/commit/[rev]/+page.svelte` | one commit |
+
+Reworked: `Source` grew from five methods to seven; `rest.ts` gained the commit
+endpoint, and `fromRest` has a caller at last; `query.ts` gained `PageOf`;
+`nav/paths.ts` gained `logHref`, `commitHref`, `fileAnchor` and their parsers,
+and lost `githubHistoryUrl` — the Log verb is internal now, and so is the blame
+gutter's commit link, which closes the two items Phase 4 carried forward.
+`Sidebar` takes a `rev` and a `logCount`, and Log is a destination rather than
+an honest dead end.
+
+**One query per page, and a page is an address.** `getLog` takes a cursor and
+`pages()` files what comes back under a key that names it. That is the whole
+pagination design: the first page is mutable and revalidates, the pages behind
+it are addressed from a cursor and are as permanent as the walk they came from,
+and a log at a commit SHA is immutable end to end.
+
+### Decisions
+
+**`resource()` was not made to paginate; `pages()` was written beside it.** The
+shared part is two lines — read the cache, then `settle()` — and the rest is
+genuinely different: appending rather than replacing, a position per page, and
+a rule for what a moved cursor invalidates. Forcing both through one primitive
+would have complicated the one that every screen depends on in order to spare
+forty lines in the one that two screens do.
+
+**A page whose cursor moved drops the pages behind it.** They were addressed
+from the cursor it used to end at, and if history has shifted under them,
+keeping them is splicing two different walks together and calling the result a
+log. Dropping them means the next `more()` re-reads — from cache, if the walk
+did not really change.
+
+**A parent outside the loaded window closes its lane.** This one rule is what
+makes the graph column survive the two cases that would otherwise wreck it. A
+path-scoped log is not a graph — filtering drops the commits in between, so no
+commit is its neighbour's parent — and without the rule every row would open a
+lane nothing ever closes, marching off the right-hand edge within a screenful.
+With it, a filtered log draws a spine, which is what a filtered log honestly
+is. The same rule handles the foot of a page, where the parents are merely not
+loaded yet; loading more redraws the column, because it is one cheap pass.
+
+**The delta bar's fill is a scale, not a proportion.** A one-line fix and a
+thousand-line rewrite have to look different from across the table, and a
+proportion of a total you cannot see says nothing at all. Cells light at 1, 10,
+50, 200 and 1,000 changed lines, written out rather than derived from a
+logarithm because those boundaries are what the eye is being asked to learn.
+The green/red split within the lit cells is proportional, with the rounding
+pinned so a change that added anything keeps a green cell and one that removed
+anything keeps a red one.
+
+**The author filter is local, and says so everywhere it appears.** GitHub can
+filter history by author server-side, but only by node ID, and turning a login
+into one costs a round trip *before* the log can be asked for — a waterfall on
+the screen, for a filter. So it narrows what is loaded, instantly, and every
+surface states the reach: the sidebar counts per author, and the tally reads
+"3 of 50 loaded · 109 commits". The path filter, which is the one the phase's
+"done when" turns on, is server-side and changes the total. Scope is a segment
+because it addresses a different object; author is a query parameter because it
+is a view of the same one.
+
+**The screen is a split, and the detail pane is the reason.** Scanning a log and
+reading a commit are two halves of one question. With the pane pinned below the
+table, `j` and `k` walk the history with each message and file list appearing in
+place, instead of a round trip to another screen for every candidate.
+`VirtualRows` virtualises against its nearest scrolling ancestor, so giving the
+table its own scroller cost nothing — Phase 3 built it for exactly this.
+
+**The pane fills in two beats, and the second one is debounced.** The whole
+message, the author, the counts and the bar are already in the log query, so
+they are there the instant the cursor lands — pressing `j` must never blank the
+screen. The file list is a second read, and it waits 120ms for the cursor to
+stop, because holding `j` down through fifty rows must not be fifty requests.
+It is the same query the commit screen makes, under the same key, so resting on
+a row pays for the screen `enter` opens.
+
+**Clicking a row selects; the row is still a link.** The same bargain the code
+viewer's line numbers make: the click is ours and calls `preventDefault`, so
+plain clicks select and the detail pane fills, while a modified click is left to
+the browser and opens the commit in a new tab. `enter` opens, and so does a
+double-click and the Diff verb.
+
+**Revert and Cherry-pick copy the command.** `PLAN.md` allows write verbs to
+link out, but github.com has no revert for a bare commit to link to, and
+`ARCHITECTURE.md` §1 says we perform no writes. What resolves instantly and is
+honest is `git revert <sha>` on the clipboard — the thing you were going to run
+anyway. Same rule as everywhere else: a verb that cannot act is absent, and one
+that can act says exactly what it did.
+
+**The diff is one flat list of fixed-height rows across every file.** File
+headers, hunk headers and lines alike, so a forty-file commit is one scroller
+and one window. A virtualised list drifts against its own arithmetic the moment
+two rows disagree about their height, so the file header is a 20px row that
+earns its presence from tint and weight rather than from size.
+
+**No syntax highlighting inside the diff.** Our scanner carries state from one
+line to the next, and a hunk is a handful of lines cut out of a file with the
+rest missing — so the state at the top of a hunk is unknown and a highlighter
+run over it would confidently colour the wrong things. A missing colour is a
+subset, which Phase 4 already accepted; a wrong one is a lie.
+
+**A commit's file list is the sidebar's `Files` section.** The commit screen had
+no obvious contextual section, and jumping to a file's patch in a forty-file
+diff is the thing you actually want there. It scrolls by row arithmetic rather
+than by anchor, because the row an `#f-…` names may not be rendered yet — the
+same trick as a deep link to line 3,000.
+
+### Deliberately deferred
+
+- **No server-side author filter.** It needs a login → node ID lookup, which is
+  a round trip before the log query rather than beside it. If the local filter
+  proves too shallow in use, the honest fix is `user(login:)` cached under its
+  own key, and a waterfall paid only while a filter is active.
+- **The log does not auto-load when you scroll to the end.** "Load more" is a
+  button, because infinite scroll on a virtualised list that is also the page's
+  scroller is a surprise, and because a rate limit is a real budget.
+- **`enter` on the log does not open a diff *scoped to the path*.** A
+  path-scoped log opens the whole commit. GitHub's compare endpoint cannot
+  filter by path either; the file list makes it a click away.
+- **No word-level diff within a line.** DESIGN.md gives the diff a sign column
+  and a row tint and nothing else, and intraline highlighting is a second
+  colour meaning on top of the one green already carries.
+- **Split (side-by-side) diff view.** Unified only, as DESIGN.md §5 specifies.
+- **"Since your last visit" is three placeholder rows** on both new screens, as
+  on the Tree and File screens. Phase 8.
+
+### Verification
+
+`bun run check` (0 errors), `bun run lint` and `bun run build` all pass.
+`bunx playwright test --repeat-each=4` — 180 passed, no flakes. The suite is 45
+tests and runs in about 35 seconds.
+
+Thirteen tests are new, and the phase is in these:
+
+- the screen carries its commits, their SHAs, authors, ages and raw counts, the
+  three right-panel blocks in fixed order, and a tally that says what it is not
+  showing — `50 of 109 commits`;
+- the graph opens a lane for a merge, carries it down beside the spine, and
+  closes it into the parent both sides share — `●╮`, `│●`, `●╯`;
+- `j`/`k` move a selection that starts unset, and the pane fills in two beats:
+  the whole message immediately, the file list after a second read;
+- `enter` opens the diff, and resting on the row had already paid for it — the
+  commit is fetched once, and the screen it opens fetches nothing;
+- the diff numbers both sides independently, signs every row, and renders its
+  hunk header — a deletion advances the old side only, an addition the new;
+- a binary file in a commit says so rather than rendering as an empty diff, and
+  a rename says where it came from;
+- a four thousand line diff renders as a window of under 140 rows, and the last
+  line is reachable by scrolling the page's own scroller;
+- the file screen's Log verb is internal, warms what it opens, and lands on a
+  path-scoped log whose total is the scope's — four commits, not a hundred and
+  nine — drawn as a spine rather than as leaked lanes;
+- the sidebar re-scopes the log by path and narrows it by author, and the author
+  filter states its reach: `3 of 50 loaded · 109 commits`;
+- a further page is fetched once, and walking the whole log down a second time
+  after leaving the screen costs nothing at all;
+- the blame gutter opens a commit inside the app now;
+- Revert and Cherry-pick copy the command, and are absent until a commit is
+  selected;
+- a commit addressed by SHA is never fetched twice, however stale everything
+  around it goes.
+
+Both themes checked by screenshot at 1440px, along with the detail pane, the
+commit screen, and the <1060px breakpoint where the right panel hides.
+
+**Still not run against live GitHub.** Two things are new and neither has met a
+real token. `Commit.history`'s cursor is the one to watch: this phase assumes a
+cursor keeps addressing the same position in the walk it came from, which is
+what makes a page cacheable under it — the stub's cursor is an index, and a real
+one is opaque. And `additions`/`deletions` on every node of a 50-commit page is
+the most expensive thing we have asked GraphQL for since blame; if it proves
+costly against the rate limit, the delta bar is the field to make optional.
+
+---
+
 ## Carried forward
 
 Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
 
-- **Run every document against a real token.** `Repo`, `Tree`, `Blob`, `File` and
-  `Blame` are schema-checked by hand and against stubs only. This has been
-  blocking since Phase 2 and is now five documents deep. `Blame` is the one that
-  most needs a real repository: it is the most expensive field we ask for, and
-  how it behaves on a large file — and whether its line numbers line up with
-  `Blob.text` exactly — is not something a stub can answer.
-- **`PLAN.md`'s first checkpoint is still unanswered.** Two screens now share the
-  right panel's three blocks and neither has argued for a different order, but
-  that is an observation from building them rather than from living with them.
-  The question stands: is the shape right, or does one screen want its own?
+- **Run every read against a real token.** `Repo`, `Tree`, `Blob`, `File`,
+  `Blame` and `Log` are schema-checked by hand and against stubs only, and the
+  REST commit endpoint has never been called for real either. This has been
+  blocking since Phase 2 and is now six documents deep. Two of them most need a
+  real repository: `Blame`, because it is the most expensive field we ask for
+  and whether its line numbers line up with `Blob.text` exactly is not something
+  a stub can answer; and `Log`, because the whole pagination design rests on a
+  cursor still addressing the same position in the walk it came from.
+- **`PLAN.md`'s checkpoints are both open now.** The first asks whether the
+  right panel's shape is right; three screens share it and none has argued for a
+  different order, but that is an observation from building them rather than
+  from living with them. The second, which falls here, asks whether the delta
+  bar earns its space and whether the graph column is worth its width. The bar
+  looks like it does — it is what makes a table of a hundred rows scannable. The
+  graph is the doubtful one: on a linear history it is a column of identical
+  dots, and it only says anything at a merge. Watch how often it does.
 - **The highlighter is a subset, and use is what will show where.** It reads the
   languages listed in `code/lang.ts`, some of them through a neighbour's grammar
   — Kotlin and Swift through Java's, PHP through C's. Note which files read badly
@@ -798,30 +1003,37 @@ Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
 - **A large or binary blob is offered as a link, not fetched.** The honest
   fallback is REST `/repos/…/git/blobs/:sha`, which is CORS-enabled and
   authenticated where `raw.githubusercontent.com` is neither for private
-  repositories. It wants `fromRest` and the mutable ETag path, which Phase 7
-  builds for the diff anyway.
+  repositories. It wanted `fromRest` and the mutable ETag path; Phase 5 built
+  both for the commit endpoint, so this is now a small piece of work with no
+  remaining dependency.
 - **`getFile` caches by `rev:path`, not by object ID.** One round trip from a URL
   was worth more than the permanent key — but the response carries the `oid`, so
   filing it under both would give a file that did not change between two branches
   one cache entry instead of two. It needs `settle()` to accept a second key,
   which is a change to the write path and not to a screen.
 - **Phase 6** extends Permalink to non-default branches, once the ref map makes
-  a commit SHA available for any revision. Both the Tree and File screens hide
-  the verb until then.
-- **The in-memory layer is still not needed.** Phase 2 deferred it until a
-  screen could say whether an IDB round trip per navigation is felt. On the Tree
-  and File screens it is not, at these sizes. Ask again in Phase 5, when the log
-  moves real volume.
-- **`resource()` has no pagination.** Trees do not need it — GitHub returns
-  `Tree.entries` whole, which is why 4,000 rows is a rendering problem and not a
-  fetching one. The log and the PR file list do. Decide in Phase 5, before
-  Phase 7 needs it too.
+  a commit SHA available for any revision. The Tree, File and Log screens all
+  hide the verb until then.
+- **The in-memory layer is still not needed.** Phase 2 deferred it and Phase 4
+  asked again here, on the grounds that the log would move real volume. It does
+  — a hundred commits a page — and an IDB round trip per navigation is still not
+  felt, because a page is one entry rather than a hundred. Ask again in Phase 7,
+  where a PR's file list and its threads are read together.
+- **Pagination is settled: `pages()`.** Phase 5 answered the question Phase 2
+  left open, and Phase 7 should walk the PR file list with the same primitive
+  rather than growing a second one. The one thing it does not do is REST
+  pagination by page *number* — `pullFiles` takes `page`, not a cursor, so
+  either the source hands back a synthetic cursor or `PageOf` learns about both.
+  Decide when the file list is built, not before.
 - **Eviction has never run under real pressure.** The ceiling is exercised by
   test; the quota path is not, because a headless browser's quota is enormous.
-  Phase 4 is when this starts to matter: file contents are the first thing we
-  cache that is measured in hundreds of kilobytes rather than in rows.
-- **The Markdown parser and the scanner have no tests of their own.** Both are
-  covered through the screens that render them — the README on the Tree screen,
-  and a file on the File screen. That is the right level while each has one
-  caller. If Phase 7 gives PR descriptions the same renderer, or the scanner
-  starts growing grammars, they earn direct tests.
+  This matters more with every phase: file contents were the first thing we
+  cached measured in hundreds of kilobytes, and a commit's patches are the
+  second.
+- **Four pure modules have no tests of their own.** The Markdown parser, the
+  scanner, the graph and the patch parser are all covered through the screens
+  that render them. That is the right level while each has one caller — but the
+  graph is the first of them whose output is a *diagram*, where a wrong answer
+  reads as a rendering quirk rather than as a failure, and the patch parser is
+  the first that Phase 7 will give a second caller. Both earn direct tests when
+  that happens.

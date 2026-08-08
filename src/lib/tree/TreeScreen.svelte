@@ -326,6 +326,7 @@
 	<Sidebar
 		repo={summary.data}
 		active="tree"
+		rev={address.rev}
 		treeCount={tree.data?.entries.length ?? null}
 		section="Files"
 	>

@@ -174,8 +174,43 @@ export interface Comparison {
 	files?: DiffFile[];
 }
 
+/** One commit, with the per-file patches GraphQL has no field for. */
+export interface CommitResponse {
+	sha: string;
+	commit: {
+		message: string;
+		author: { name: string; email: string; date: string } | null;
+		committer: { name: string; email: string; date: string } | null;
+	};
+	author: { login: string } | null;
+	parents: { sha: string }[];
+	stats?: { additions: number; deletions: number; total: number };
+	files?: DiffFile[];
+}
+
 /** GitHub caps the compare response here — ARCHITECTURE.md §11. */
 export const COMPARE_FILE_CAP = 300;
+
+/** And a single commit's file list here, for the same reason. */
+export const COMMIT_FILE_CAP = 300;
+
+/**
+ * One commit and everything it touched — PLAN.md Phase 5's diff.
+ *
+ * GraphQL has no patch field at all, so this is REST's, and it is the only way
+ * to see what a commit actually did without cloning. The ref may be a SHA or a
+ * name; a SHA is what the log links to, and what makes the answer permanent.
+ */
+export function commitDetail(
+	repo: RepoRef,
+	rev: string,
+	options: RestOptions = {}
+): Promise<RestResult<CommitResponse>> {
+	return restGet<CommitResponse>(
+		`/repos/${encodeRef(repo.owner)}/${encodeRef(repo.name)}/commits/${encodeRef(rev)}`,
+		options
+	);
+}
 
 /**
  * `base...head` for any two SHAs or refs. This is what powers "since your

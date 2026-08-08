@@ -12,6 +12,8 @@ import { lineHash, type LineRange } from './lines';
  *   /{owner}/{name}/tree/{rev}/{path}   tree at a revision, in a directory
  *   /{owner}/{name}/blob/{rev}/{path}   a file
  *   /{owner}/{name}/blame/{rev}/{path}  a file, with the blame gutter
+ *   /{owner}/{name}/log/{rev}/{path}    history, optionally scoped to a path
+ *   /{owner}/{name}/commit/{oid}        one commit, and its diff
  *
  * **The blame gutter is part of the address, not a toggle beside it.** View and
  * Blame are two ways of reading the same object, and both are things you send
@@ -53,6 +55,26 @@ export interface FileAddress {
 	path: string;
 	/** Which of the two file routes this is. */
 	blame: boolean;
+}
+
+export interface LogAddress {
+	repo: RepoRef;
+	/** `null` means "whatever this repository's default branch is". */
+	rev: string | null;
+	/** The path history is scoped to, `''` for the whole repository. */
+	path: string;
+	/**
+	 * The author the log is narrowed to, by login or name. A query parameter
+	 * rather than a segment: it narrows what is shown of an address rather than
+	 * naming a different one, and it should drop off when you walk up the path.
+	 */
+	author: string | null;
+}
+
+export interface CommitAddress {
+	repo: RepoRef;
+	/** A SHA, usually. The route accepts any revision GitHub can resolve. */
+	rev: string;
 }
 
 export function repoHref(repo: RepoRef): string {
@@ -104,6 +126,85 @@ export function fileHref(
 		: resolve('/[owner]/[name]/blob/[rev]/[...path]', params);
 
 	return base + lineHash(options.lines ?? null);
+}
+
+/**
+ * History at a revision, optionally scoped to a path and narrowed to an author.
+ *
+ * The path is a segment and the author is a parameter, deliberately: scoping
+ * the log to a directory is a different object, and narrowing it to a person is
+ * a view of the same one.
+ */
+export function logHref(
+	repo: RepoRef,
+	rev: string | null,
+	path = '',
+	options: { author?: string | null } = {}
+): string {
+	const base = resolve('/[owner]/[name]/log/[rev]/[...path]', {
+		owner: segment(repo.owner),
+		name: segment(repo.name),
+		rev: rev === null ? 'HEAD' : segment(rev),
+		path: encodePath(path)
+	});
+
+	return options.author ? `${base}?author=${segment(options.author)}` : base;
+}
+
+/**
+ * One commit. What `enter` opens from the log, and where the blame gutter goes.
+ * `file` addresses one file's patch within it, which is how a touched file in
+ * the log's detail pane links to the change it is describing.
+ */
+export function commitHref(
+	repo: RepoRef,
+	rev: string,
+	options: { file?: string | null } = {}
+): string {
+	const base = resolve('/[owner]/[name]/commit/[rev]', {
+		owner: segment(repo.owner),
+		name: segment(repo.name),
+		rev: segment(rev)
+	});
+
+	return options.file ? `${base}#${fileAnchor(options.file)}` : base;
+}
+
+/** The id a file's patch carries on the commit screen, and the hash that finds it. */
+export function fileAnchor(path: string): string {
+	return `f-${segment(path)}`;
+}
+
+/** The path an anchor names, or `null` if the hash is not one. */
+export function parseFileAnchor(hash: string): string | null {
+	if (!hash.startsWith('#f-')) return null;
+	try {
+		return decodeURIComponent(hash.slice(3));
+	} catch {
+		// A hand-edited hash. Not an address, so not an error either.
+		return null;
+	}
+}
+
+/** Read a log address out of SvelteKit's params and the query string. */
+export function parseLog(
+	params: Record<string, string | undefined>,
+	search?: URLSearchParams
+): LogAddress {
+	const rev = params.rev ?? null;
+	return {
+		repo: { owner: params.owner ?? '', name: params.name ?? '' },
+		rev: rev === null || rev === 'HEAD' ? null : rev,
+		path: cleanPath(params.path ?? ''),
+		author: search?.get('author') || null
+	};
+}
+
+export function parseCommit(params: Record<string, string | undefined>): CommitAddress {
+	return {
+		repo: { owner: params.owner ?? '', name: params.name ?? '' },
+		rev: params.rev ?? ''
+	};
 }
 
 /** Read a file address out of SvelteKit's params. Both file routes land here. */
@@ -163,12 +264,11 @@ export function rawUrl(repo: RepoRef, rev: string, path: string): string {
 	return `https://raw.githubusercontent.com/${segment(repo.owner)}/${segment(repo.name)}/${segment(rev)}/${encodePath(path)}`;
 }
 
-/** A path's history. The Log screen is Phase 5; until then this is the verb. */
-export function githubHistoryUrl(repo: RepoRef, rev: string, path: string): string {
-	return `${slug(repo)}/commits/${segment(rev)}/${encodePath(path)}`;
-}
-
-/** One commit. The blame gutter links here until Phase 5 shows a diff. */
+/**
+ * One commit on github.com. The commit screen renders the patch itself now, so
+ * this is only the way out when GitHub declined to send one — a binary blob, or
+ * a diff past the cap it will inline (ARCHITECTURE.md §11).
+ */
 export function githubCommitUrl(repo: RepoRef, oid: string): string {
 	return `${slug(repo)}/commit/${segment(oid)}`;
 }

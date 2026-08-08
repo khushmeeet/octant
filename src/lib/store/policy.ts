@@ -30,6 +30,18 @@ export const FRESHNESS = {
 	 * so the file's own revalidation is what notices, a beat earlier.
 	 */
 	blame: 120_000,
+	/**
+	 * A page of history at a branch. Only the first page is ever really at a
+	 * branch — the pages behind it are addressed from a cursor — so this is the
+	 * window on "has anything landed", which is the same question the repository
+	 * summary asks.
+	 */
+	log: 30_000,
+	/**
+	 * A commit addressed by name rather than by SHA. Addressed by SHA — which is
+	 * how the log links to one — it is immutable and this is never consulted.
+	 */
+	commit: 30_000,
 	/** The ref → SHA map. */
 	refs: 30_000,
 	/** Pull request state. */
