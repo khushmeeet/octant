@@ -431,6 +431,174 @@ function logNode(commit: HistoryStub) {
 	};
 }
 
+/* ----------------------------------------------------- Phase 6: the refs -- */
+
+/** When a commit landed. One place, because three stubs now need to agree. */
+function commitDate(n: number): string {
+	return new Date(Date.UTC(2026, 0, 1) + n * 3_600_000).toISOString();
+}
+
+/**
+ * `main` is the repository stub's HEAD, which is not one of the history's own
+ * SHAs — so the compare stub aliases it to the newest commit. Everything else
+ * points at a real one.
+ */
+const AS_COMMIT = new Map<string, HistoryStub>([...BY_OID, [HEAD, HISTORY[0]]]);
+
+interface BranchStub {
+	name: string;
+	commit: number | null;
+	/** As read on screen: commits this branch has that `main` does not. */
+	ahead: number;
+	behind: number;
+}
+
+const BRANCHES: BranchStub[] = [
+	{ name: 'main', commit: null, ahead: 0, behind: 0 },
+	{ name: 'parser-rewrite', commit: 105, ahead: 6, behind: 2 },
+	{ name: 'release/1.0', commit: 101, ahead: 0, behind: 12 }
+];
+
+interface TagStub {
+	name: string;
+	commit: number;
+	/** Annotated tags carry a message; lightweight ones point straight at a commit. */
+	message?: string;
+}
+
+/**
+ * Three real releases and enough filler behind them to need a second page —
+ * which is what makes "the tag before this one" a question the screen can get
+ * wrong at a page boundary.
+ */
+const TAGS: TagStub[] = [
+	{
+		name: 'v1.2.0',
+		commit: 109,
+		message: 'The parser rewrite ships.\n\nCompiles are about a third faster.'
+	},
+	{ name: 'v1.1.0', commit: 106, message: 'Slow compiler, fast parser.' },
+	{ name: 'v1.0.0', commit: 101 },
+	...Array.from({ length: 117 }, (_, i) => ({
+		name: `v0.${117 - i}.0`,
+		commit: Math.max(1, 100 - i)
+	}))
+];
+
+/** What a ref's target looks like once GitHub has resolved it. */
+function tipNode(n: number) {
+	const found = HISTORY.find((commit) => commit.n === n);
+	return {
+		__typename: 'Commit',
+		oid: sha(n),
+		abbreviatedOid: sha(n).slice(0, 7),
+		messageHeadline: found?.headline ?? 'a commit',
+		committedDate: commitDate(n),
+		author: {
+			name: found?.author === 'simon' ? 'Simon' : 'Rich Harris',
+			user: { login: found?.author ?? 'rich' }
+		}
+	};
+}
+
+function branchNode(branch: BranchStub, withCompare: boolean) {
+	return {
+		name: branch.name,
+		// **GitHub's own inversion**, reproduced deliberately: `Ref.compare` is
+		// called with the ref as the *base*, so `aheadBy` is how far the default
+		// branch has run ahead — which is this branch's behind. A screen that read
+		// the fields straight through would pass every other test and report every
+		// stale branch as a busy one.
+		...(withCompare ? { compare: { aheadBy: branch.behind, behindBy: branch.ahead } } : {}),
+		target:
+			branch.commit === null
+				? {
+						__typename: 'Commit',
+						oid: HEAD,
+						abbreviatedOid: HEAD.slice(0, 7),
+						messageHeadline: REPOSITORY.defaultBranchRef.target.messageHeadline,
+						committedDate: REPOSITORY.defaultBranchRef.target.committedDate,
+						author: { name: 'Rich', user: { login: 'rich' } }
+					}
+				: tipNode(branch.commit)
+	};
+}
+
+function tagNode(tag: TagStub) {
+	if (tag.message === undefined) return { name: tag.name, target: tipNode(tag.commit) };
+
+	return {
+		name: tag.name,
+		target: {
+			__typename: 'Tag',
+			message: tag.message,
+			tagger: { name: 'Rich Harris', date: commitDate(tag.commit), user: { login: 'rich' } },
+			target: tipNode(tag.commit)
+		}
+	};
+}
+
+/**
+ * `base...head` as GitHub sends it. The range is every commit strictly after
+ * the older endpoint and up to the newer, oldest first — which is the order a
+ * shortlog is printed in.
+ */
+function restCompare(range: string) {
+	const [base = '', head = ''] = range.split('...');
+	const from = AS_COMMIT.get(base);
+	const to = AS_COMMIT.get(head);
+
+	const lo = Math.min(from?.n ?? 0, to?.n ?? 0);
+	const hi = Math.max(from?.n ?? 0, to?.n ?? 0);
+	const between = HISTORY.filter((commit) => commit.n > lo && commit.n <= hi).sort(
+		(a, b) => a.n - b.n
+	);
+
+	const files = new Map<string, DiffFileStub>();
+	for (const commit of between) {
+		for (const file of PATCHES[commit.n] ?? []) files.set(file.filename, file);
+	}
+
+	const forward = (to?.n ?? 0) >= (from?.n ?? 0);
+
+	return {
+		status: between.length === 0 ? 'identical' : forward ? 'ahead' : 'behind',
+		ahead_by: forward ? between.length : 0,
+		behind_by: forward ? 0 : between.length,
+		total_commits: between.length,
+		base_commit: { sha: base, commit: { message: '', author: null }, author: null },
+		merge_base_commit: { sha: base, commit: { message: '', author: null }, author: null },
+		commits: between.map((commit) => ({
+			sha: sha(commit.n),
+			commit: {
+				message: [commit.headline, commit.body].filter(Boolean).join('\n\n'),
+				author: {
+					name: commit.author === 'simon' ? 'Simon' : 'Rich Harris',
+					email: 'dev@svelte.dev',
+					date: commitDate(commit.n)
+				}
+			},
+			author: { login: commit.author }
+		})),
+		files: [...files.values()]
+	};
+}
+
+/**
+ * What a bare revision resolves to — the field Phase 6 adds to the tree and
+ * file queries so Permalink works on a branch that is not the default one.
+ */
+const REV_OIDS: Record<string, string> = {
+	'release/1.0': sha(101),
+	'parser-rewrite': sha(105),
+	'v1.2.0': sha(109)
+};
+
+function revOid(rev: string): string {
+	if (/^[0-9a-f]{40}$/.test(rev)) return rev;
+	return REV_OIDS[rev] ?? HEAD;
+}
+
 function restCommit(oid: string) {
 	const found = BY_OID.get(oid);
 	const files = found ? (PATCHES[found.n] ?? []) : [];
@@ -461,7 +629,7 @@ function restCommit(oid: string) {
 
 interface Body {
 	operationName?: string;
-	variables?: Record<string, string | number | null>;
+	variables?: Record<string, string | number | boolean | null>;
 }
 
 function bodyOf(route: Route): Body {
@@ -489,10 +657,14 @@ interface Stub {
 	readonly logs: Record<string, number>;
 	/** Commit requests per SHA. The REST read, and the one `enter` depends on. */
 	readonly commits: Record<string, number>;
+	/** Ref requests per kind. Two walks, so two counters. */
+	readonly refs: Record<string, number>;
+	/** Compare requests per `base...head`. A tag's changelog turns on this. */
+	readonly compares: Record<string, number>;
 	/** Replace the handler for one operation mid-test. */
 	on(
 		operation: string,
-		handler: (route: Route, variables: Record<string, string | number | null>) => unknown
+		handler: (route: Route, variables: Record<string, string | number | boolean | null>) => unknown
 	): void;
 }
 
@@ -507,10 +679,12 @@ async function signIn(page: Page): Promise<Stub> {
 	const blames: Record<string, number> = {};
 	const logs: Record<string, number> = {};
 	const commits: Record<string, number> = {};
+	const refs: Record<string, number> = {};
+	const compares: Record<string, number> = {};
 
 	const handlers: Record<
 		string,
-		(route: Route, variables: Record<string, string | number | null>) => unknown
+		(route: Route, variables: Record<string, string | number | boolean | null>) => unknown
 	> = {
 		Viewer: (route) => json(route, { data: { viewer: VIEWER, rateLimit: rateLimit(4999) } }),
 		Repo: (route) => json(route, { data: { repository: REPOSITORY, rateLimit: rateLimit(4998) } }),
@@ -526,7 +700,15 @@ async function signIn(page: Page): Promise<Stub> {
 			// tree screen hand the address to the file screen.
 			const object = TREES[path] ?? (FILES[path] ? { __typename: 'Blob' } : null);
 			return json(route, {
-				data: { repository: { object }, rateLimit: rateLimit(4997) }
+				data: {
+					repository: {
+						object,
+						// Phase 6: the revision resolves to a commit in the same round
+						// trip, which is what Permalink addresses.
+						commit: { __typename: 'Commit', oid: revOid(String(variables.rev ?? 'HEAD')) }
+					},
+					rateLimit: rateLimit(4997)
+				}
 			});
 		},
 		File: (route, variables) => {
@@ -548,7 +730,8 @@ async function signIn(page: Page): Promise<Stub> {
 									isTruncated: found.isTruncated ?? false,
 									text: found.text
 								}
-							: (TREES[path] ?? null) && { __typename: 'Tree' }
+							: (TREES[path] ?? null) && { __typename: 'Tree' },
+						commit: { __typename: 'Commit', oid: revOid(String(variables.rev ?? 'HEAD')) }
 					},
 					rateLimit: rateLimit(4995)
 				}
@@ -621,15 +804,57 @@ async function signIn(page: Page): Promise<Stub> {
 					rateLimit: rateLimit(4993)
 				}
 			});
+		},
+		Refs: (route, variables) => {
+			const tag = String(variables.prefix ?? '') === 'refs/tags/';
+			const kind = tag ? 'tag' : 'branch';
+			refs[kind] = (refs[kind] ?? 0) + 1;
+
+			const first = Number(variables.first ?? 100);
+			const after = variables.after == null ? null : String(variables.after);
+			const start = after ? Number(after) + 1 : 0;
+
+			// Deliberately handed back in an order the screen must not trust: the
+			// branch list arrives alphabetically, which is what `refs(orderBy:)`
+			// degrades to outside `refs/tags/`.
+			const all = tag
+				? TAGS.map(tagNode)
+				: [...BRANCHES]
+						.sort((a, b) => a.name.localeCompare(b.name))
+						.map((branch) => branchNode(branch, variables.withCompare === true));
+
+			const slice = all.slice(start, start + first);
+
+			return json(route, {
+				data: {
+					repository: {
+						refs: {
+							totalCount: all.length,
+							pageInfo: {
+								hasNextPage: start + slice.length < all.length,
+								endCursor: slice.length > 0 ? String(start + slice.length - 1) : null
+							},
+							nodes: slice
+						}
+					},
+					rateLimit: rateLimit(4992)
+				}
+			});
 		}
 	};
 
-	// One commit and its patches is the only read in the app that is REST, so it
-	// is the only one that does not come through the GraphQL endpoint.
+	// A commit's patches and a range's are the two reads that are REST, because
+	// GraphQL has no patch field. They are the only ones not on the endpoint.
 	await page.route('https://api.github.com/repos/*/*/commits/*', async (route) => {
 		const oid = route.request().url().split('/').pop() ?? '';
 		commits[oid] = (commits[oid] ?? 0) + 1;
 		await json(route, restCommit(oid));
+	});
+
+	await page.route('https://api.github.com/repos/*/*/compare/*', async (route) => {
+		const range = decodeURIComponent(route.request().url().split('/compare/').pop() ?? '');
+		compares[range] = (compares[range] ?? 0) + 1;
+		await json(route, restCompare(range));
 	});
 
 	await page.route(GRAPHQL, async (route) => {
@@ -656,6 +881,8 @@ async function signIn(page: Page): Promise<Stub> {
 		blames,
 		logs,
 		commits,
+		refs,
+		compares,
 		on(operation, handler) {
 			handlers[operation] = handler;
 		}
@@ -1730,4 +1957,258 @@ test('a commit is permanent, so its diff is never fetched twice', async ({ page 
 	await expect(page.getByText('@@ -1,4 +1,5 @@')).toBeVisible();
 
 	expect(stub.commits[INLINE]).toBe(1);
+});
+
+/* ----------------------------------------------- Phase 6: refs and compare -- */
+
+const REFS = '/sveltejs/svelte/refs';
+
+/** The refs table, as a set of places you can go. */
+function refList(page: Page) {
+	return page.getByRole('navigation', { name: 'Refs' });
+}
+
+function refPane(page: Page) {
+	return page.getByRole('region', { name: 'Selected ref' });
+}
+
+async function openRefs(page: Page, at = REFS) {
+	await page.goto(at);
+	await expect(refList(page).getByRole('link').first()).toBeVisible();
+}
+
+test('branches and tags are one screen, and the sidebar reaches it', async ({ page }) => {
+	const stub = await signIn(page);
+	await openRepo(page);
+
+	// Refs is a destination now, not an honest dead end. Its count is both
+	// kinds together, because they are one object.
+	const nav = page.getByRole('navigation', { name: 'Primary' });
+	await expect(nav.getByRole('link', { name: /Refs/ })).toBeVisible();
+	await nav.getByRole('link', { name: /Refs/ }).click();
+	await expect(page).toHaveURL(REFS);
+
+	// One list, two headings, and every branch and the first page of tags in it.
+	await expect(refList(page)).toContainText('Branches');
+	await expect(refList(page)).toContainText('Tags');
+	await expect(refList(page).getByRole('link', { name: /^main/ })).toBeVisible();
+	await expect(refList(page).getByRole('link', { name: /^v1\.2\.0/ })).toBeVisible();
+
+	// One query per kind, in parallel — not one per ref.
+	expect(stub.refs.branch).toBe(1);
+	expect(stub.refs.tag).toBe(1);
+
+	const panel = page.getByRole('complementary', { name: 'Context' });
+	await expect(panel.getByRole('heading').nth(0)).toHaveText('Since your last visit');
+	await expect(panel.getByRole('heading').nth(1)).toHaveText('About');
+	await expect(panel.getByRole('heading').nth(2)).toHaveText('Open against it');
+});
+
+test('ahead and behind are read the right way round, and are not the API order', async ({
+	page
+}) => {
+	await signIn(page);
+	await openRefs(page, `${REFS}?kind=branches`);
+
+	// GitHub calls the ref the *base*, so its `aheadBy` is this branch's behind.
+	// The stub sends it GitHub's way round; the screen has to turn it back.
+	const branch = refList(page).getByRole('link', { name: /^parser-rewrite/ });
+	await expect(branch.locator('.up')).toHaveText('↑6');
+	await expect(branch.locator('.down')).toHaveText('↓2');
+
+	const stale = refList(page).getByRole('link', { name: /^release\/1\.0/ });
+	await expect(stale.locator('.up')).toHaveText('↑0');
+	await expect(stale.locator('.down')).toHaveText('↓12');
+
+	// The default branch has nothing to be ahead of, and says so instead.
+	await expect(refList(page).getByRole('link', { name: /^main/ })).toContainText('default');
+
+	// Most recent first, whatever order the API answered in — the stub replies
+	// alphabetically on purpose, which would put `main` last.
+	const names = refList(page).getByRole('link').locator('.name');
+	await expect(names.nth(0)).toHaveText('main');
+	await expect(names.nth(2)).toHaveText('release/1.0');
+});
+
+test('a tag carries its message and its shortlog — the refs page is the changelog', async ({
+	page
+}) => {
+	const stub = await signIn(page);
+	await openRefs(page, `${REFS}?kind=tags`);
+
+	await refList(page)
+		.getByRole('link', { name: /^v1\.2\.0/ })
+		.click();
+	await expect(page).toHaveURL(`${REFS}?kind=tags&ref=${encodeURIComponent('tags/v1.2.0')}`);
+
+	// The annotation is in the refs query, so it is there immediately.
+	const pane = refPane(page);
+	await expect(pane).toContainText('The parser rewrite ships.');
+	await expect(pane).toContainText('Compiles are about a third faster.');
+
+	// The shortlog is the second beat: three commits since v1.1.0, grouped by
+	// author, busiest first — which is `git shortlog -n`.
+	await expect(pane).toContainText('3 commits since v1.1.0');
+	const shortlog = pane.locator('.shortlog');
+	await expect(shortlog).toContainText('rich (2):');
+	await expect(shortlog).toContainText('simon (1):');
+	await expect(shortlog).toContainText('inline the parser call');
+
+	// Exactly one range was compared, and it was addressed by the two SHAs the
+	// list already held rather than by the tag names.
+	expect(stub.compares[`${sha(106)}...${sha(109)}`]).toBe(1);
+	expect(Object.keys(stub.compares)).toHaveLength(1);
+});
+
+test('walking the tag list with j and k is one comparison per rest, not per row', async ({
+	page
+}) => {
+	const stub = await signIn(page);
+	await openRefs(page, `${REFS}?kind=tags`);
+
+	// Three rows in one go, without stopping on any of them. From nothing,
+	// either direction starts at the top — the rule every list here follows.
+	await page.keyboard.press('j');
+	await page.keyboard.press('j');
+	await page.keyboard.press('j');
+
+	// The pane keeps up regardless, because the first beat costs nothing: the
+	// name, the tip and the tag's own message all came with the refs query.
+	await expect(page).toHaveURL(`${REFS}?kind=tags&ref=${encodeURIComponent('tags/v1.0.0')}`);
+	await expect(refPane(page)).toContainText('v1.0.0');
+
+	// The second beat is the one that waits, and only the row we stopped on
+	// ever asked for it — the two we walked through were never compared.
+	await expect(refPane(page).locator('.shortlog')).toContainText('add the readme');
+	expect(stub.compares[`${sha(100)}...${sha(101)}`]).toBe(1);
+	expect(Object.keys(stub.compares)).toHaveLength(1);
+
+	// The selection is replaced, not pushed, so three rows left no history
+	// behind them: one step back leaves the screen rather than the last row.
+	await page.goBack();
+	await expect(page).toHaveURL('/');
+});
+
+test('a tag at the edge of a page says it cannot see the one before it', async ({ page }) => {
+	await signIn(page);
+	await openRefs(page, `${REFS}?kind=tags`);
+
+	// The hundredth tag is the last one loaded, and the tag before it is on a
+	// page nobody has asked for. Saying so beats an empty pane.
+	await page.keyboard.press('/');
+	await page.keyboard.type('v0.21.0');
+	await refList(page).getByRole('link').first().click();
+	await expect(refPane(page)).toContainText('Load more tags');
+
+	await page.getByRole('button', { name: 'Load more tags' }).click();
+	await expect(refPane(page).locator('.tally')).toContainText('since v0.20.0');
+});
+
+test('the refs verbs act, and Log since previous opens the range', async ({ page }) => {
+	const stub = await signIn(page);
+	await openRefs(page, `${REFS}?kind=tags`);
+	await refList(page)
+		.getByRole('link', { name: /^v1\.2\.0/ })
+		.click();
+
+	// The verb row PLAN.md Phase 6 asks for, over a tag.
+	for (const verb of ['Browse', 'Log since previous', 'Archive', 'Compare', 'Permalink']) {
+		await expect(page.getByRole('link', { name: verb, exact: true })).toBeVisible();
+	}
+
+	// Permalink addresses the commit the tag points at, permanently.
+	await expect(page.getByRole('link', { name: 'Permalink', exact: true })).toHaveAttribute(
+		'href',
+		`/sveltejs/svelte/tree/${sha(109)}`
+	);
+
+	await page.getByRole('link', { name: 'Log since previous' }).click();
+	await expect(page).toHaveURL(`/sveltejs/svelte/compare/${sha(106)}/${sha(109)}`);
+
+	// Resting on the row had already paid for it: the range is fetched once.
+	expect(stub.compares[`${sha(106)}...${sha(109)}`]).toBe(1);
+});
+
+test('the compare screen carries the range, its commits and its diff', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/sveltejs/svelte/compare/${sha(106)}/${sha(109)}`);
+
+	const main = page.getByRole('main');
+	await expect(main).toContainText('3 commits');
+
+	// Oldest first, as a release reads.
+	const commits = page.getByRole('navigation', { name: 'Commits in this range' });
+	await expect(commits.getByRole('link')).toHaveCount(3);
+	await expect(commits.getByRole('link').first()).toContainText('document the new flag');
+	await expect(commits.getByRole('link').last()).toContainText('merge the parser rewrite');
+
+	// And the diff itself, through the same view the commit screen uses — the
+	// patch parser's second caller, which is what Phase 5 said would earn it one.
+	await expect(page.getByText('@@ -1,4 +1,5 @@').first()).toBeVisible();
+	await expect(main).toContainText('src/compiler.js');
+
+	const panel = page.getByRole('complementary', { name: 'Context' });
+	await expect(panel).toContainText('Merge base');
+
+	// Swap is a link, so it resolves without a request being made for it.
+	await page.getByRole('link', { name: 'Swap' }).click();
+	await expect(page).toHaveURL(`/sveltejs/svelte/compare/${sha(109)}/${sha(106)}`);
+});
+
+test('a range between two SHAs is permanent, so it is never fetched twice', async ({ page }) => {
+	const stub = await signIn(page);
+	const range = `${sha(106)}...${sha(109)}`;
+
+	await page.goto(`/sveltejs/svelte/compare/${sha(106)}/${sha(109)}`);
+	await expect(page.getByText('@@ -1,4 +1,5 @@').first()).toBeVisible();
+	expect(stub.compares[range]).toBe(1);
+
+	// A new document, a new store, nothing in memory — and both endpoints are
+	// SHAs, so it is immutable however stale everything around it goes.
+	await expireMutable(page);
+	await page.reload();
+	await expect(page.getByText('@@ -1,4 +1,5 @@').first()).toBeVisible();
+
+	expect(stub.compares[range]).toBe(1);
+});
+
+test('permalink now works on a branch that is not the default one', async ({ page }) => {
+	await signIn(page);
+
+	// Phases 3 to 5 hid the verb here: the only commit SHA a screen held came
+	// from the repository summary's HEAD, which is the default branch's.
+	await page.goto(`/sveltejs/svelte/tree/${encodeURIComponent('release/1.0')}/src`);
+	await expect(listing(page).getByRole('link', { name: 'compiler.js' })).toBeVisible();
+
+	await expect(page.getByRole('link', { name: 'Permalink' })).toHaveAttribute(
+		'href',
+		`/sveltejs/svelte/tree/${sha(101)}/src`
+	);
+
+	// The file screen resolves the same expression in the same round trip.
+	await page.goto(`/sveltejs/svelte/blob/${encodeURIComponent('release/1.0')}/src/compiler.js`);
+	await expect(line(page, 1)).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Permalink' })).toHaveAttribute(
+		'href',
+		`/sveltejs/svelte/blob/${sha(101)}/src/compiler.js`
+	);
+});
+
+test('the kind filter narrows the screen, and the ref filter narrows the list', async ({
+	page
+}) => {
+	await signIn(page);
+	await openRefs(page);
+
+	const sidebar = page.getByRole('navigation', { name: 'Primary' });
+	await sidebar.getByRole('link', { name: /^Branches/ }).click();
+	await expect(page).toHaveURL(`${REFS}?kind=branches`);
+	await expect(refList(page)).not.toContainText('v1.2.0');
+	await expect(refList(page).getByRole('link')).toHaveCount(3);
+
+	// `/` focuses the filter, and it narrows what is loaded — as everywhere else.
+	await page.keyboard.press('/');
+	await page.keyboard.type('release');
+	await expect(refList(page).getByRole('link')).toHaveCount(1);
+	await expect(refList(page).getByRole('link').first()).toContainText('release/1.0');
 });

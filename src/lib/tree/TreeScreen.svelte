@@ -195,17 +195,17 @@
 	/* -------------------------------------------------------------- verbs -- */
 
 	/**
-	 * A permalink needs a commit SHA, and Phase 3 only knows one for the default
-	 * branch. Rather than offer a verb that cannot act — DESIGN.md §5 requires
-	 * every verb to resolve — it is absent on any other revision until Phase 6's
-	 * ref map makes the SHA available for all of them.
+	 * A permalink needs the commit SHA of whatever revision is on screen, and
+	 * Phase 3 only had one for the default branch — so the verb was absent
+	 * everywhere else. Phase 6 puts the answer in the tree query itself
+	 * (`source/revision.ts`), which resolves an expression it was already
+	 * sending, so the verb works on any branch or tag and still costs nothing.
+	 * It is absent only when the address is already permanent.
 	 */
 	const head = $derived(summary.data?.head ?? null);
-	const onDefaultBranch = $derived(
-		address.rev === null || address.rev === summary.data?.defaultBranch
-	);
-	const permalink = $derived(head && onDefaultBranch ? treeHref(repo, head.oid, path) : null);
-	const alreadyPermanent = $derived(address.rev !== null && address.rev === head?.oid);
+	const commitOid = $derived(tree.data?.commitOid ?? null);
+	const permalink = $derived(commitOid ? treeHref(repo, commitOid, path) : null);
+	const alreadyPermanent = $derived(address.rev !== null && address.rev === commitOid);
 
 	let copied = $state(false);
 

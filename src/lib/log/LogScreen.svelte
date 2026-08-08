@@ -198,10 +198,19 @@
 	/* -------------------------------------------------------------- verbs -- */
 
 	const head = $derived(summary.data?.head ?? null);
-	const onDefaultBranch = $derived(
-		address.rev === null || address.rev === summary.data?.defaultBranch
-	);
-	const alreadyPermanent = $derived(address.rev !== null && address.rev === head?.oid);
+
+	/**
+	 * The commit this log walks from — Phase 6, and what Permalink addresses on
+	 * any revision rather than only the default branch.
+	 *
+	 * It comes from the directory listing rather than from the log pages,
+	 * because `siblings` resolves the same revision this screen is showing and
+	 * is already fetched on every visit (`source/revision.ts`). Threading it out
+	 * through `pages()` instead would mean teaching a generic pagination
+	 * primitive about a field only one of its callers has.
+	 */
+	const commitOid = $derived(siblings.data?.commitOid ?? null);
+	const alreadyPermanent = $derived(address.rev !== null && address.rev === commitOid);
 
 	/** Where a commit's tree starts: the scope, or the directory holding it. */
 	const scopeDir = $derived(scopeIsFile ? listingPath : path);
@@ -278,15 +287,11 @@
 			});
 		}
 
-		/**
-		 * A permalink needs a commit SHA, and this phase only knows one for the
-		 * default branch — Phase 6's ref map extends it to the rest.
-		 */
-		if (head && onDefaultBranch && !alreadyPermanent) {
+		if (commitOid && !alreadyPermanent) {
 			list.push({
 				id: 'permalink',
 				label: 'Permalink',
-				href: logHref(repo, head.oid, path, { author: address.author }),
+				href: logHref(repo, commitOid, path, { author: address.author }),
 				title: 'Address this history by commit SHA — cached permanently once you do'
 			});
 		}

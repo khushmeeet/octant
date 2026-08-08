@@ -1,8 +1,10 @@
-import { FRESHNESS, immutableKey, mutableKey, revKey } from '$lib/store';
+import { FRESHNESS, immutableKey, isOid, mutableKey, revKey } from '$lib/store';
 import { getBlame, type FileBlame } from './blame';
 import { getBlob, getFile, type BlobContent, type FileContent } from './blob';
 import { getCommit, type CommitDetail } from './commit';
+import { getCompare, type CompareResult } from './compare';
 import { getLog, type LogPage } from './log';
+import { getRefs, type RefKind, type RefsPage } from './refs';
 import { getRepo, type RepoSummary } from './repo';
 import { fromQuery, type CacheQuery } from './query';
 import { getTree, type TreeListing } from './tree';
@@ -15,11 +17,11 @@ import type { RepoRef } from './types';
  * `LocalSource` backed by a git sidecar would satisfy the same interface.
  * Everything above this line is pure UI and knows nothing about GitHub.
  *
- * The architecture names nine methods. Seven are implemented, and the interface
- * declares seven — a method that exists and throws is a worse lie than one that
+ * The architecture names nine methods. Nine are implemented, and the interface
+ * declares nine — a method that exists and throws is a worse lie than one that
  * is honestly absent, and the compiler is more use when the interface tells the
- * truth. `getRefs` and `getPulls` arrive with the screens that need them, in
- * Phases 6 and 7.
+ * truth. Phase 6 adds `getRefs` and `getCompare`; `getPulls` and the pull
+ * request's own diff arrive with the Review screen in Phase 7.
  */
 
 export interface Source {
@@ -62,6 +64,25 @@ export interface Source {
 	 * the app that goes over REST, because GraphQL has no patch field.
 	 */
 	getCommit(ref: RepoRef, rev: string): CacheQuery<CommitDetail>;
+
+	/**
+	 * One page of branches, or one page of tags — the same read, since they are
+	 * the same object. `base` names the ref ahead/behind is measured against;
+	 * `null` asks for no comparison at all, which is what a tag list wants.
+	 */
+	getRefs(
+		ref: RepoRef,
+		kind: RefKind,
+		base?: string | null,
+		after?: string | null
+	): CacheQuery<RefsPage>;
+
+	/**
+	 * `base...head`: the commits between two points and the diff they add up
+	 * to. What shipped in a release, and what a branch has that the default
+	 * branch does not.
+	 */
+	getCompare(ref: RepoRef, base: string, head: string): CacheQuery<CompareResult>;
 }
 
 export const GitHubSource: Source = {
@@ -133,6 +154,37 @@ export const GitHubSource: Source = {
 			key: revKey('commit', ref, rev),
 			maxAge: FRESHNESS.commit,
 			run: (options) => getCommit(ref, rev, options)
+		};
+	},
+
+	getRefs(ref, kind, base = null, after = null) {
+		// Refs are the mutable layer by definition — a ref that stopped moving
+		// would be a SHA. The base is part of the address because the ahead and
+		// behind columns are answers about it, and the cursor is part of it for
+		// the same reason it is on a log page: a page is filed under where it
+		// starts (`pages()`).
+		const page = after ? `after=${after}` : 'head';
+
+		return {
+			key: mutableKey('refs', ref, `${kind}:${base ?? 'none'}:${page}`),
+			maxAge: FRESHNESS.refs,
+			run: (options) => getRefs(ref, kind, base, after, options).then(fromQuery)
+		};
+	},
+
+	getCompare(ref, base, head) {
+		// **Both** endpoints have to be SHAs for this to be permanent, which is
+		// why `revKey` is not enough here: it decides from one revision, and a
+		// comparison has two. A range with a branch on either side is a question
+		// about now and revalidates like one.
+		const permanent = isOid(base) && isOid(head);
+
+		return {
+			key: permanent
+				? immutableKey('compare', ref, base, head)
+				: mutableKey('compare', ref, `${base}...${head}`),
+			maxAge: FRESHNESS.compare,
+			run: (options) => getCompare(ref, base, head, options)
 		};
 	}
 };

@@ -173,11 +173,15 @@
 
 	/* -------------------------------------------------------------- verbs -- */
 
+	/**
+	 * Phase 6 makes Permalink work on any revision. The file query resolves the
+	 * commit its expression names in the same round trip (`source/revision.ts`),
+	 * so the SHA is here for a branch or a tag as well as for the default
+	 * branch — which is what Phases 3 to 5 hid the verb for want of.
+	 */
 	const head = $derived(summary.data?.head ?? null);
-	const onDefaultBranch = $derived(
-		address.rev === null || address.rev === summary.data?.defaultBranch
-	);
-	const alreadyPermanent = $derived(address.rev !== null && address.rev === head?.oid);
+	const commitOid = $derived(file.data?.commitOid ?? null);
+	const alreadyPermanent = $derived(address.rev !== null && address.rev === commitOid);
 
 	/** What github.com calls this revision when we have not been given a name. */
 	const outRev = $derived(rev === 'HEAD' ? (summary.data?.defaultBranch ?? 'HEAD') : rev);
@@ -233,11 +237,11 @@
 			}
 		);
 
-		if (head && onDefaultBranch && !alreadyPermanent) {
+		if (commitOid && !alreadyPermanent) {
 			list.push({
 				id: 'permalink',
 				label: 'Permalink',
-				href: fileHref(repo, head.oid, path, { blame: address.blame, lines: selection }),
+				href: fileHref(repo, commitOid, path, { blame: address.blame, lines: selection }),
 				title: 'Address this file by commit SHA — cached permanently once you do'
 			});
 		}

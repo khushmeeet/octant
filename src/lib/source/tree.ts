@@ -1,6 +1,7 @@
 import { document } from './document';
 import { fail } from './errors';
 import { query, type QueryOptions, type QueryResult } from './graphql';
+import { COMMIT_FIELD, commitOid, type RevisionNode } from './revision';
 import type { RepoRef } from './types';
 
 /**
@@ -10,6 +11,11 @@ import type { RepoRef } from './types';
  * Mode and size, and no per-file last-commit column: that column costs a blame
  * walk per entry and is rarely acted on (ARCHITECTURE.md §2). This is one round
  * trip for a directory, and at a commit SHA the answer is permanent.
+ *
+ * Phase 6 adds a second aliased field for the commit the revision names, which
+ * is what makes Permalink work on a branch that is not the default one — see
+ * `revision.ts`. It resolves an expression the query was already sending, so it
+ * costs no round trip and no waterfall.
  */
 
 interface EntryNode {
@@ -31,11 +37,17 @@ interface ObjectNode {
 interface TreeVars extends RepoRef {
 	/** `rev:path` — `main:src/lib`. An empty path is the root: `main:`. */
 	expression: string;
+	/** The same revision on its own, for the commit it names. */
+	rev: string;
 }
 
-export const TREE = document<{ repository: { object: ObjectNode | null } | null }, TreeVars>({
+interface TreeData {
+	repository: { object: ObjectNode | null; commit: RevisionNode | null } | null;
+}
+
+export const TREE = document<TreeData, TreeVars>({
 	name: 'Tree',
-	variables: '$owner: String!, $name: String!, $expression: String!',
+	variables: '$owner: String!, $name: String!, $expression: String!, $rev: String!',
 	body: `
 	repository(owner: $owner, name: $name) {
 		object(expression: $expression) {
@@ -53,7 +65,7 @@ export const TREE = document<{ repository: { object: ObjectNode | null } | null 
 					}
 				}
 			}
-		}
+		}${COMMIT_FIELD}
 	}`
 });
 
@@ -79,6 +91,12 @@ export interface TreeListing {
 	/** Repo-relative directory, `''` at the root. */
 	path: string;
 	entries: TreeEntry[];
+	/**
+	 * The commit the revision named, which is what a Permalink addresses.
+	 * `null` when the revision resolved to something that is not a commit —
+	 * which for a bare revision means it did not resolve at all.
+	 */
+	commitOid: string | null;
 }
 
 export async function getTree(
@@ -88,7 +106,7 @@ export async function getTree(
 	options: QueryOptions = {}
 ): Promise<QueryResult<TreeListing>> {
 	const clean = path.replace(/^\/+|\/+$/g, '');
-	const result = await query(TREE, { ...ref, expression: `${rev}:${clean}` }, options);
+	const result = await query(TREE, { ...ref, expression: `${rev}:${clean}`, rev }, options);
 	if (!result.ok) return result;
 
 	const node = result.data.repository?.object ?? null;
@@ -118,7 +136,8 @@ export async function getTree(
 		data: {
 			oid: node.oid ?? '',
 			path: clean,
-			entries: (node.entries ?? []).map(entry).sort(byKind)
+			entries: (node.entries ?? []).map(entry).sort(byKind),
+			commitOid: commitOid(result.data.repository?.commit)
 		},
 		partial: result.partial
 	};

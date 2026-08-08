@@ -1,3 +1,4 @@
+import type { RefKind } from '$lib/source/refs';
 import { resolve } from '$app/paths';
 import type { RepoRef } from '$lib/source/types';
 import { lineHash, type LineRange } from './lines';
@@ -14,6 +15,8 @@ import { lineHash, type LineRange } from './lines';
  *   /{owner}/{name}/blame/{rev}/{path}  a file, with the blame gutter
  *   /{owner}/{name}/log/{rev}/{path}    history, optionally scoped to a path
  *   /{owner}/{name}/commit/{oid}        one commit, and its diff
+ *   /{owner}/{name}/refs                branches and tags, on one screen
+ *   /{owner}/{name}/compare/{base}/{head}   what is between two revisions
  *
  * **The blame gutter is part of the address, not a toggle beside it.** View and
  * Blame are two ways of reading the same object, and both are things you send
@@ -75,6 +78,40 @@ export interface CommitAddress {
 	repo: RepoRef;
 	/** A SHA, usually. The route accepts any revision GitHub can resolve. */
 	rev: string;
+}
+
+export interface RefsAddress {
+	repo: RepoRef;
+	/**
+	 * Which of the two kinds is shown, `null` for both. A query parameter and
+	 * not a segment, because ARCHITECTURE.md §2 is explicit that branches and
+	 * tags are the same object — narrowing to one is a view of that screen, not
+	 * a different address, exactly as the log's author filter is.
+	 */
+	kind: RefKind | null;
+	/**
+	 * The ref whose detail is open. In the URL rather than in local state,
+	 * unlike the log's cursor, because "what shipped in v1.2.0" is a thing you
+	 * send someone — and it is replaced rather than pushed as you walk, the same
+	 * call the file screen makes about addressing lines in turn.
+	 */
+	ref: RefSelection | null;
+}
+
+/**
+ * Qualified with git's own prefix, so a branch and a tag of the same name are
+ * two addresses rather than a coin toss.
+ */
+export interface RefSelection {
+	kind: RefKind;
+	name: string;
+}
+
+export interface CompareAddress {
+	repo: RepoRef;
+	/** Where the range starts. Either endpoint may be a SHA or a name. */
+	base: string;
+	head: string;
 }
 
 export function repoHref(repo: RepoRef): string {
@@ -168,6 +205,85 @@ export function commitHref(
 	});
 
 	return options.file ? `${base}#${fileAnchor(options.file)}` : base;
+}
+
+/**
+ * Branches and tags — PLAN.md Phase 6. The URL names sets rather than a type
+ * (`?kind=tags`, not `?kind=tag`) because that is what it selects and what the
+ * sidebar calls them.
+ */
+const KIND_SLUG: Record<RefKind, string> = { branch: 'branches', tag: 'tags' };
+const KINDS: Record<string, RefKind> = { branches: 'branch', tags: 'tag' };
+
+/** How a selected ref is spelled in the URL: git's prefix, then the name. */
+const REF_SLUG: Record<RefKind, string> = { branch: 'heads', tag: 'tags' };
+const REF_KINDS: Record<string, RefKind> = { heads: 'branch', tags: 'tag' };
+
+export function refsHref(
+	repo: RepoRef,
+	options: { kind?: RefKind | null; ref?: RefSelection | null } = {}
+): string {
+	const base = resolve('/[owner]/[name]/refs', {
+		owner: segment(repo.owner),
+		name: segment(repo.name)
+	});
+
+	const search = new URLSearchParams();
+	if (options.kind) search.set('kind', KIND_SLUG[options.kind]);
+	if (options.ref) search.set('ref', `${REF_SLUG[options.ref.kind]}/${options.ref.name}`);
+
+	const query = search.toString();
+	return query ? `${base}?${query}` : base;
+}
+
+export function parseRefs(
+	params: Record<string, string | undefined>,
+	search?: URLSearchParams
+): RefsAddress {
+	return {
+		repo: { owner: params.owner ?? '', name: params.name ?? '' },
+		kind: KINDS[search?.get('kind') ?? ''] ?? null,
+		ref: parseRefSelection(search?.get('ref'))
+	};
+}
+
+function parseRefSelection(value: string | null | undefined): RefSelection | null {
+	if (!value) return null;
+	// The prefix is everything before the first slash; the name keeps the rest,
+	// because `heads/release/1.0` is a branch called `release/1.0`.
+	const cut = value.indexOf('/');
+	if (cut === -1) return null;
+
+	const kind = REF_KINDS[value.slice(0, cut)];
+	const name = value.slice(cut + 1);
+	return kind && name ? { kind, name } : null;
+}
+
+/**
+ * `base...head`, as two encoded segments rather than github.com's single
+ * `base...head` one. Same rule as the revision: a ref name may contain a slash
+ * and a triple dot is a legal filename, so putting the split in the URL's own
+ * structure is the only version that never needs resolving.
+ *
+ * The Refs screen always addresses this with the two commit SHAs it has just
+ * finished resolving, which makes the answer permanent — a tag's changelog is
+ * computed once, ever. The route accepts names too, for a URL typed by hand.
+ */
+export function compareHref(repo: RepoRef, base: string, head: string): string {
+	return resolve('/[owner]/[name]/compare/[base]/[head]', {
+		owner: segment(repo.owner),
+		name: segment(repo.name),
+		base: segment(base),
+		head: segment(head)
+	});
+}
+
+export function parseCompare(params: Record<string, string | undefined>): CompareAddress {
+	return {
+		repo: { owner: params.owner ?? '', name: params.name ?? '' },
+		base: params.base ?? '',
+		head: params.head ?? ''
+	};
 }
 
 /** The id a file's patch carries on the commit screen, and the hash that finds it. */
@@ -276,6 +392,15 @@ export function githubCommitUrl(repo: RepoRef, oid: string): string {
 /** A download, so it is instant by definition and belongs in the verb row. */
 export function archiveUrl(repo: RepoRef, rev: string): string {
 	return `${slug(repo)}/archive/${segment(rev)}.zip`;
+}
+
+/**
+ * The same range on github.com. The compare screen renders it itself now, so
+ * this is the way out when GitHub declined to inline the patches — a range past
+ * the cap it will send (ARCHITECTURE.md §11).
+ */
+export function githubCompareUrl(repo: RepoRef, base: string, head: string): string {
+	return `${slug(repo)}/compare/${segment(base)}...${segment(head)}`;
 }
 
 /* ------------------------------------------------------------- private -- */

@@ -1,6 +1,7 @@
 import { document } from './document';
 import { fail, type SourceError } from './errors';
 import { query, type QueryOptions, type QueryResult } from './graphql';
+import { COMMIT_FIELD, commitOid, type RevisionNode } from './revision';
 import type { RepoRef } from './types';
 
 /**
@@ -56,15 +57,21 @@ export const BLOB = document<{ repository: { object: BlobNode | null } | null },
 interface FileVars extends RepoRef {
 	/** `rev:path` — `main:src/lib/app.ts`. */
 	expression: string;
+	/** The same revision on its own, for the commit it names — `revision.ts`. */
+	rev: string;
 }
 
-export const FILE = document<{ repository: { object: BlobNode | null } | null }, FileVars>({
+interface FileData {
+	repository: { object: BlobNode | null; commit: RevisionNode | null } | null;
+}
+
+export const FILE = document<FileData, FileVars>({
 	name: 'File',
-	variables: '$owner: String!, $name: String!, $expression: String!',
+	variables: '$owner: String!, $name: String!, $expression: String!, $rev: String!',
 	body: `
 	repository(owner: $owner, name: $name) {
 		object(expression: $expression) {${BLOB_FIELDS}
-		}
+		}${COMMIT_FIELD}
 	}`
 });
 
@@ -85,6 +92,8 @@ export interface BlobContent {
 /** A blob that knows where it lives, which is what a file screen addresses. */
 export interface FileContent extends BlobContent {
 	path: string;
+	/** The commit the revision named. What Permalink addresses — Phase 6. */
+	commitOid: string | null;
 }
 
 export async function getBlob(
@@ -108,13 +117,21 @@ export async function getFile(
 	options: QueryOptions = {}
 ): Promise<QueryResult<FileContent>> {
 	const clean = path.replace(/^\/+|\/+$/g, '');
-	const result = await query(FILE, { ...ref, expression: `${rev}:${clean}` }, options);
+	const result = await query(FILE, { ...ref, expression: `${rev}:${clean}`, rev }, options);
 	if (!result.ok) return result;
 
 	const content = read(result.data.repository?.object ?? null, `${clean} at ${rev}`);
 	if (!content.ok) return content;
 
-	return { ok: true, data: { ...content.data, path: clean }, partial: result.partial };
+	return {
+		ok: true,
+		data: {
+			...content.data,
+			path: clean,
+			commitOid: commitOid(result.data.repository?.commit)
+		},
+		partial: result.partial
+	};
 }
 
 /**
