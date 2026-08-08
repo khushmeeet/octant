@@ -7,3 +7,9 @@ bun.lockb
 
 # Miscellaneous
 /static/
+
+# Specification documents — hand-authored, kept exactly as written
+ARCHITECTURE.md
+DESIGN.md
+PLAN.md
+PROGRESS.md

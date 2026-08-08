@@ -1,9 +1,35 @@
 <script lang="ts">
-	import './layout.css';
+	import '../app.css';
 	import favicon from '$lib/assets/favicon.svg';
+	import TokenGate from '$lib/auth/TokenGate.svelte';
+	import { session } from '$lib/auth/token.svelte';
+	import { theme } from '$lib/ui/theme.svelte';
 
 	let { children } = $props();
+
+	// Client-only (`ssr = false`), so `document` is available at init.
+	theme.init();
+	void session.restore();
 </script>
 
-<svelte:head><link rel="icon" href={favicon} /></svelte:head>
-{@render children()}
+<svelte:head>
+	<link rel="icon" href={favicon} />
+	<title>Octant</title>
+</svelte:head>
+
+{#if session.status === 'loading'}
+	<!-- An IndexedDB read, not a network call. Deliberately blank rather
+	     than a spinner that would outlive the wait it explains. -->
+	<div class="boot"></div>
+{:else if session.status === 'signed-out'}
+	<TokenGate />
+{:else}
+	{@render children()}
+{/if}
+
+<style>
+	.boot {
+		min-height: 100dvh;
+		background: var(--bg);
+	}
+</style>
