@@ -91,7 +91,12 @@ function detail(node: CommitResponse): CommitDetail {
 	};
 }
 
-function changed(file: DiffFile): ChangedFile {
+/**
+ * Exported because the compare endpoint sends the identical per-file shape —
+ * Phase 6 is the second caller, and a second mapping would be a second place
+ * for a rename to stop being reported.
+ */
+export function changed(file: DiffFile): ChangedFile {
 	return {
 		path: file.filename,
 		previousPath: file.previous_filename ?? null,

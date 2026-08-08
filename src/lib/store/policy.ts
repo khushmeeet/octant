@@ -44,6 +44,12 @@ export const FRESHNESS = {
 	commit: 30_000,
 	/** The ref → SHA map. */
 	refs: 30_000,
+	/**
+	 * A comparison between two revisions that are not both SHAs — so one of its
+	 * endpoints is a branch, and it is as volatile as that branch. Between two
+	 * SHAs it is immutable and this is never consulted.
+	 */
+	compare: 30_000,
 	/** Pull request state. */
 	pull: 30_000,
 	/** Check runs, while CI is moving. */

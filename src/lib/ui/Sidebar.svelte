@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { session } from '$lib/auth/token.svelte';
-	import { logHref, repoHref } from '$lib/nav/paths';
+	import { logHref, refsHref, repoHref } from '$lib/nav/paths';
 	import type { RepoSummary } from '$lib/source';
 	import Icon from './Icon.svelte';
 	import { count } from './format';
@@ -12,12 +12,12 @@
 	 * ARCHITECTURE.md §2. Four items, and branches and tags share one screen
 	 * because they are the same object.
 	 *
-	 * Phase 3 replaced Phase 0's local `active` state with the route, and Phase 5
-	 * makes Log a real destination. Refs and Review are still rendered but not
-	 * reachable: their counts are real and come from the repository summary we
-	 * already hold, and the item says plainly that the screen is not built rather
-	 * than linking somewhere that isn't there. An honest dead end beats a stub
-	 * route.
+	 * Phase 3 replaced Phase 0's local `active` state with the route, Phase 5
+	 * makes Log a real destination and Phase 6 does the same for Refs. Review is
+	 * still rendered but not reachable: its count is real and comes from the
+	 * repository summary we already hold, and the item says plainly that the
+	 * screen is not built rather than linking somewhere that isn't there. An
+	 * honest dead end beats a stub route.
 	 */
 	export type NavId = 'tree' | 'log' | 'refs' | 'review';
 
@@ -36,6 +36,8 @@
 		 * repository's total once a path narrows it.
 		 */
 		logCount?: number | null;
+		/** Refs on screen, when a screen knows better than the summary does. */
+		refsCount?: number | null;
 		/** Contextual section heading — `Files`, `Symbols`, `Scope`, `Threads`. */
 		section?: string;
 		/** The contextual section's body. */
@@ -48,6 +50,7 @@
 		rev = null,
 		treeCount = null,
 		logCount = null,
+		refsCount = null,
 		section = 'Files',
 		children
 	}: Props = $props();
@@ -91,8 +94,10 @@
 			id: 'refs',
 			label: 'Refs',
 			icon: 'branch',
-			count: repo ? repo.counts.branches + repo.counts.tags : null,
-			href: null,
+			// Branches and tags, counted together, because they are one object
+			// and one screen — ARCHITECTURE.md §2.
+			count: refsCount ?? (repo ? repo.counts.branches + repo.counts.tags : null),
+			href: repo ? refsHref(repo) : null,
 			phase: 6
 		},
 		{

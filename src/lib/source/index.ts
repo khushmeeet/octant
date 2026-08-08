@@ -37,6 +37,18 @@ export { getBlame, BLAME, type BlameCommit, type BlameRange, type FileBlame } fr
 export { getLog, logAuthor, LOG, LOG_PAGE_SIZE, type LogCommit, type LogPage } from './log';
 export { getCommit, type ChangedFile, type ChangeStatus, type CommitDetail } from './commit';
 export {
+	getRefs,
+	refAuthor,
+	REFS,
+	REFS_PAGE_SIZE,
+	type Annotation,
+	type RefEntry,
+	type RefKind,
+	type RefsPage
+} from './refs';
+export { getCompare, type CompareCommitInfo, type CompareResult } from './compare';
+export { commitOid, type RevisionNode } from './revision';
+export {
 	fromQuery,
 	fromRest,
 	type CacheQuery,

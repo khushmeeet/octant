@@ -15,7 +15,7 @@ got to.
 | 3 — Tree screen | **Done** | 2026-08-08 |
 | 4 — File and blame | **Done** | 2026-08-08 |
 | 5 — Log | **Done** | 2026-08-08 |
-| 6 — Refs | Not started | — |
+| 6 — Refs | **Done** | 2026-08-08 |
 | 7 — Review | Not started | — |
 | 8 — Since your last visit | Not started | — |
 | 9 — Command palette | Not started | — |
@@ -975,18 +975,227 @@ costly against the rate limit, the delta bar is the field to make optional.
 
 ---
 
+## Phase 6 — Refs
+
+**Done when:** you can read what shipped in a release without a separate
+changelog file. ✅ — on a stubbed repository, and pinned by tests. The
+live-token qualifier under **Verification** still stands.
+
+### What was built
+
+Two screens again, for the same reason Phase 5 needed two: a list of tags says
+that releases happened, and the thing you came to find out is what was *in*
+one.
+
+| File | Role |
+|---|---|
+| `source/refs.ts` | the `Refs` document and `getRefs` — one page of branches, or of tags |
+| `source/compare.ts` | `getCompare`: `base...head`, over REST |
+| `source/revision.ts` | the commit a revision names, and the field two documents carry to ask |
+| `refs/shortlog.ts` | commits in, `git shortlog` out |
+| `refs/RefsScreen.svelte` | the screen: two walks, one list, the selected ref's range |
+| `refs/RefDetail.svelte` | DESIGN.md §5's Tag block — pills, message, shortlog |
+| `refs/Kinds.svelte` | the sidebar's `Scope`: which half, and what drift is measured against |
+| `compare/CompareScreen.svelte` | a range: its commits and its whole diff |
+| `routes/[owner]/[name]/refs/+page.svelte` | branches and tags |
+| `routes/[owner]/[name]/compare/[base]/[head]/+page.svelte` | what is between two revisions |
+
+Reworked: `Source` grew from seven methods to nine, which is every method
+`ARCHITECTURE.md` §9 names except the two the Review screen will add;
+`tree.ts` and `blob.ts` carry one more aliased field each; `commit.ts` exports
+its per-file mapper, because the compare endpoint sends the identical shape;
+`nav/paths.ts` gained `refsHref`, `compareHref`, their parsers and
+`githubCompareUrl`; `Sidebar` makes Refs a destination and takes a `refsCount`;
+`policy.ts` gained `FRESHNESS.compare`. The Tree, File and Log screens lost the
+condition that hid their Permalink verb.
+
+**One query per kind, in parallel, and one comparison for the ref you stop on.**
+The refs list is two `pages()` walks over one document; the shortlog is a third
+read, debounced, keyed by the two SHAs the list already resolved. Nothing in
+the screen is per-row.
+
+### Decisions
+
+**The ref map turned out to be the wrong shape, and the right answer was
+cheaper.** Four phases have been carrying "Phase 6 extends Permalink once the
+ref map makes a commit SHA available for any revision". A map is a second query
+per screen — and every screen was *already* asking GitHub to resolve its
+revision: a tree query resolves `main:src`, a file query resolves
+`main:src/app.ts`. So `source/revision.ts` adds one aliased field that resolves
+`main` in the same round trip, and Permalink works on any branch or tag for the
+price of nothing. The map would have bought the same answer twice.
+
+It peels through `Tag`, which is the part worth being careful about:
+`object(expression: "v1.2.0")` on an annotated tag answers with the tag object,
+whose `oid` is a real SHA that is not a commit SHA. A permalink built from it
+would address something that is not a revision.
+
+**Branches get `compare`; tags do not.** They are one object and one document,
+but they are not one question. What you want to know about a branch is how far
+it has drifted from the default branch; what you want to know about a tag is
+what shipped in it, which is a comparison with the tag *before* it, not with
+`main`. `@include(if: $withCompare)` is what keeps the second question from
+paying for the first: GitHub computes a merge base per node the field appears
+on, and a hundred of them on a tag list nobody reads the number from is the
+fan-out `ARCHITECTURE.md` §7 rules out.
+
+**Ahead and behind are inverted on the way in, and that is GitHub's doing.**
+`Ref.compare(headRef:)` treats the ref it is called on as the *base*, so its
+`aheadBy` is how far the default branch has run ahead of this branch — which is
+this branch's *behind*. Reading the two fields straight through would pass every
+shape check and report every stale branch as a busy one. The stub speaks
+GitHub's way round on purpose, so the test would fail if the mapping were ever
+"simplified".
+
+**The branch walk waits for the repository summary. It is the only wait in the
+app.** `Ref.compare` needs the default branch *by name*, and only the summary
+has it. The alternatives were worse: fetching the list twice — once without the
+column, once with — or dropping the column that makes forty branches scannable.
+In practice there is no wait at all, because you arrive here from another screen
+of the same repository and the summary is a cache hit on the first frame. On a
+cold direct link it is one query deep, on a screen that is nobody's entry point.
+
+**Refs are sorted at the source, newest first.** The query asks for
+`TAG_COMMIT_DATE` descending, but that field is documented against `refs/tags/`
+— a branch list that came back alphabetically would bury the branch you pushed
+an hour ago, and the stub returns branches alphabetically so the screen cannot
+quietly rely on the server. Same call `getTree` makes about directories: display
+order belongs in the cached value, not in the render path.
+
+**Selection lives in the URL here, and nowhere else does.** The log's cursor is
+local state, because a row of a log is a place you are passing through. A tag is
+not: "what shipped in v1.2.0" is a thing you send someone. So `?ref=tags/v1.2.0`
+is the address, and it is *replaced* rather than pushed as you walk — the same
+call the file screen makes about addressing lines in turn, and for the same
+reason: reading twenty tags is one step back out of the screen, not twenty. It
+is qualified with git's own prefix so a branch and a tag of the same name are
+two addresses rather than a coin toss.
+
+**Which kind is shown is a query parameter, because branches and tags are one
+object.** `ARCHITECTURE.md` §2 is explicit about that, and the log already drew
+this line: a scope is a segment, a view is a parameter.
+
+**The compare screen exists because two of the verbs would otherwise have been
+the same link out.** `PLAN.md` asks for Browse / Log since previous / Archive /
+Compare / Permalink, and github.com answers both "log since previous" and
+"compare" with one page — two verbs, one destination, neither of them ours. What
+they are actually asking is one REST read we already had. `DiffView` and the
+patch parser came with Phase 5 and this is their second caller;
+`comparisonTruncated` has been in `rest.ts` since Phase 1 precisely so
+truncation would be found before something depended on it. It is also the read
+`ARCHITECTURE.md` §6 names for "since your last review", so Phase 7 starts from
+a compare that works.
+
+**The shortlog is grouped by author, busiest first**, where git's default is
+alphabetical and `-n` is what you actually type. It is rendered in a `<pre>`
+because DESIGN.md §5 says so and because a shortlog is the one place in this app
+where alignment carries meaning — it is read as a block, not as rows.
+
+**Everything the Refs screen addresses, it addresses by SHA.** The list has just
+finished resolving every ref to a commit, so the pane's comparison, the "Log
+since previous" verb and the Compare verb all use those SHAs: one cache entry
+shared between the pane and the screen it opens, and a tag's changelog computed
+once ever rather than every thirty seconds. `getCompare` needs **both** endpoints
+to be object IDs before it will file the answer as permanent — `revKey` decides
+from one revision and a range has two, so that check is written out in
+`source.ts` rather than inferred.
+
+**Ahead and behind stay greyscale.** `DESIGN.md` §3 spends green and red on diff
+state and each meaning is used once. The numbers carry their own meaning, the
+arrows are not colour, and the title says it in words.
+
+**A group heading is a row.** The list is one `VirtualRows` window over
+branches, tags, their headings and their "load more" buttons alike — the same
+call the diff makes about file headers, and for the same reason: a virtualised
+list drifts the moment two rows disagree about their height. It also means the
+keyboard walks everything the mouse can reach, with `j`/`k` stepping over the
+headings.
+
+### Deliberately deferred
+
+- **No `Ref.compare` for tags, so no ahead/behind column on them.** If reading
+  the screen in anger wants it, the field is one `@include` flag away — but it
+  would double what the tag list costs to answer a question the shortlog
+  already answers better.
+- **The filter is local, over what is loaded.** `refs(query:)` would narrow
+  server-side, but it would also make every keystroke a request and reset the
+  walk. Same call Phase 5 made about the author filter, and the tally says how
+  far the filter reaches.
+- **"Previous tag" is the previous tag by commit date**, not by version
+  ordering. `v1.10.0` and `v1.9.0` sort by when they were cut rather than by
+  what they are called, which is right far more often than a version parser
+  would be and never pretends to understand a scheme it has not seen.
+- **The compare screen has no base/head pickers.** Every route into it names
+  both ends. A picker is a Phase 9 palette question, not a form.
+- **No word-level diff, no split view**, as on the commit screen. Unchanged.
+- **"Since your last visit" is three placeholder rows** on both new screens.
+  Phase 8.
+
+### Verification
+
+`bun run check` (0 errors), `bun run lint` and `bun run build` all pass.
+`bunx playwright test --repeat-each=3` — 165 passed, no flakes. The suite is 55
+tests and runs in about 38 seconds.
+
+Ten tests are new, and the phase is in these:
+
+- branches and tags arrive as one screen with one heading each, reached from a
+  sidebar item that is a link at last, and paid for with one query per kind —
+  not one per ref;
+- ahead and behind are read the right way round: the stub answers the way
+  GitHub does, with the ref as the base, and a branch six ahead and two behind
+  has to come out of fields that say two and six;
+- the list is ordered newest-first even though the stub answers alphabetically;
+- a tag carries its annotation immediately and its shortlog a beat later —
+  three commits since `v1.1.0`, grouped `rich (2)` then `simon (1)`, from
+  exactly one comparison addressed by the two SHAs the list already held;
+- walking three tags with `j` costs one comparison, not three, and one step back
+  leaves the whole walk rather than replaying it;
+- a tag at the foot of a page says it cannot see the tag before it, and says so
+  again with a number once the next page is loaded;
+- the five verbs `PLAN.md` names are there over a tag, Permalink addresses the
+  commit it points at, and "Log since previous" opens a range that resting on
+  the row had already paid for;
+- the compare screen carries its commits oldest-first and its whole diff, and
+  Swap is a link;
+- a range between two SHAs is never fetched twice, however stale everything
+  around it goes;
+- Permalink now resolves on `release/1.0` — on the tree screen and the file
+  screen both — which is the thing Phases 3, 4 and 5 hid the verb for want of.
+
+Both themes checked by screenshot at 1440px, along with the tag block and the
+compare screen, and the <1060px breakpoint where the right panel hides.
+
+**Still not run against live GitHub.** Three things are new and none has met a
+real token. `Ref.compare`'s direction is the one to watch — it is the field this
+screen's most load-bearing column is made of, and the inversion above is read
+from GitHub's own wording rather than from a response. `refs(orderBy:)` with
+`TAG_COMMIT_DATE` is documented against tags only, so what it does to a branch
+list is worth looking at once (the source sorts each page regardless, so the
+failure mode is an odd order across page boundaries, not a wrong one within a
+page). And the REST compare endpoint has never been called for real: its caps —
+250 commits, 300 files — are what `truncated` is made of, and a real release
+range is the first thing that will test them.
+
+---
+
 ## Carried forward
 
 Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
 
 - **Run every read against a real token.** `Repo`, `Tree`, `Blob`, `File`,
-  `Blame` and `Log` are schema-checked by hand and against stubs only, and the
-  REST commit endpoint has never been called for real either. This has been
-  blocking since Phase 2 and is now six documents deep. Two of them most need a
-  real repository: `Blame`, because it is the most expensive field we ask for
-  and whether its line numbers line up with `Blob.text` exactly is not something
-  a stub can answer; and `Log`, because the whole pagination design rests on a
-  cursor still addressing the same position in the walk it came from.
+  `Blame`, `Log` and `Refs` are schema-checked by hand and against stubs only,
+  and neither REST endpoint — the commit, now the compare — has been called for
+  real. This has been blocking since Phase 2 and is now seven documents deep.
+  Three most need a real repository: `Blame`, because it is the most expensive
+  field we ask for and whether its line numbers line up with `Blob.text` exactly
+  is not something a stub can answer; `Log`, because the whole pagination design
+  rests on a cursor still addressing the same position in the walk it came from;
+  and `Refs`, because `Ref.compare`'s direction is read from GitHub's wording
+  rather than from a response, and a whole column depends on getting it the
+  right way round. **This is now the largest single risk in the project** — six
+  screens are built on documents no server has ever validated, and one afternoon
+  with a token would retire most of it.
 - **`PLAN.md`'s checkpoints are both open now.** The first asks whether the
   right panel's shape is right; three screens share it and none has argued for a
   different order, but that is an observation from building them rather than
@@ -994,7 +1203,11 @@ Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
   bar earns its space and whether the graph column is worth its width. The bar
   looks like it does — it is what makes a table of a hundred rows scannable. The
   graph is the doubtful one: on a linear history it is a column of identical
-  dots, and it only says anything at a merge. Watch how often it does.
+  dots, and it only says anything at a merge. Watch how often it does. Phase 6
+  is a third data point for the first checkpoint and did not want a different
+  order either, though it did want a block whose rows are not key/value pairs —
+  the tag's shortlog went in the detail pane rather than the panel, which is the
+  first time a screen has had something the panel's shape could not hold.
 - **The highlighter is a subset, and use is what will show where.** It reads the
   languages listed in `code/lang.ts`, some of them through a neighbour's grammar
   — Kotlin and Swift through Java's, PHP through C's. Note which files read badly
@@ -1011,29 +1224,38 @@ Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
   filing it under both would give a file that did not change between two branches
   one cache entry instead of two. It needs `settle()` to accept a second key,
   which is a change to the write path and not to a screen.
-- **Phase 6** extends Permalink to non-default branches, once the ref map makes
-  a commit SHA available for any revision. The Tree, File and Log screens all
-  hide the verb until then.
-- **The in-memory layer is still not needed.** Phase 2 deferred it and Phase 4
-  asked again here, on the grounds that the log would move real volume. It does
-  — a hundred commits a page — and an IDB round trip per navigation is still not
-  felt, because a page is one entry rather than a hundred. Ask again in Phase 7,
-  where a PR's file list and its threads are read together.
+- **The in-memory layer is still not needed.** Deferred in Phase 2, asked again
+  in Phases 4 and 5. The Refs screen reads three entries at once — two ref pages
+  and a comparison — and it is still not felt, for the same reason: a page is one
+  entry rather than a hundred. Phase 7 is the real test, where a PR's file list
+  and its threads are read together.
 - **Pagination is settled: `pages()`.** Phase 5 answered the question Phase 2
   left open, and Phase 7 should walk the PR file list with the same primitive
   rather than growing a second one. The one thing it does not do is REST
   pagination by page *number* — `pullFiles` takes `page`, not a cursor, so
   either the source hands back a synthetic cursor or `PageOf` learns about both.
   Decide when the file list is built, not before.
+- **The compare screen is most of what "since my last review" needs.** Phase 7's
+  default view is `storedHeadSha...currentHeadSha` (`ARCHITECTURE.md` §6), which
+  is the read and the render this phase built. What it does not have is the
+  `visits` half — the stored head SHA, and the force-push check that decides
+  whether the old one is still reachable. Build the review screen on
+  `CompareScreen`'s shape rather than beside it.
+- **`getCompare` does not paginate.** REST sends at most 250 commits and 300
+  files and `truncated` says so honestly, which is the right answer for a
+  release range. A pull request's file list is the case that needs real paging,
+  and `pullFiles` takes a page *number* rather than a cursor — see the
+  pagination item above.
 - **Eviction has never run under real pressure.** The ceiling is exercised by
   test; the quota path is not, because a headless browser's quota is enormous.
   This matters more with every phase: file contents were the first thing we
   cached measured in hundreds of kilobytes, and a commit's patches are the
   second.
-- **Four pure modules have no tests of their own.** The Markdown parser, the
-  scanner, the graph and the patch parser are all covered through the screens
-  that render them. That is the right level while each has one caller — but the
-  graph is the first of them whose output is a *diagram*, where a wrong answer
-  reads as a rendering quirk rather than as a failure, and the patch parser is
-  the first that Phase 7 will give a second caller. Both earn direct tests when
-  that happens.
+- **Five pure modules have no tests of their own**, and one of them is now
+  overdue. The Markdown parser, the scanner, the graph, the patch parser and now
+  the shortlog are all covered through the screens that render them, which is the
+  right level while each has one caller. The patch parser no longer does — Phase
+  6's compare screen is its second — so the direct test Phase 5 promised on that
+  condition falls due now rather than in Phase 7. The graph is still the other
+  one worth doing, because its output is a *diagram* and a wrong answer there
+  reads as a rendering quirk rather than as a failure.
