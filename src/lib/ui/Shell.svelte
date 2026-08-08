@@ -13,14 +13,19 @@
 	 * geography is learned once.
 	 */
 	interface Props {
+		sidebar?: Snippet;
 		header?: Snippet;
 		verbs?: Snippet;
 		panel?: Snippet;
 		children: Snippet;
 	}
 
-	let { header, verbs, panel, children }: Props = $props();
+	let { sidebar, header, verbs, panel, children }: Props = $props();
 </script>
+
+{#snippet defaultSidebar()}
+	<Sidebar />
+{/snippet}
 
 {#snippet defaultHeader()}
 	<Header />
@@ -35,7 +40,7 @@
 {/snippet}
 
 <div class="app">
-	<Sidebar />
+	{@render (sidebar ?? defaultSidebar)()}
 	<div class="body">
 		{@render (header ?? defaultHeader)()}
 		{@render (verbs ?? defaultVerbs)()}

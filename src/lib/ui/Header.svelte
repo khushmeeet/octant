@@ -1,15 +1,24 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import Icon from './Icon.svelte';
 	import Pill from './Pill.svelte';
 	import RateMeter from './RateMeter.svelte';
 	import { theme } from './theme.svelte';
+	import type { Crumb } from './types';
 
+	/**
+	 * Breadcrumb left, pills right — DESIGN.md §5.
+	 *
+	 * A screen supplies its own pills (ref, HEAD SHA, state); the meter, the
+	 * palette and the theme toggle are the chrome's and always sit outermost, so
+	 * their position never depends on which screen you are on.
+	 */
 	interface Props {
-		/** Breadcrumb segments, last one emphasised. */
-		crumbs?: string[];
+		crumbs?: Crumb[];
+		pills?: Snippet;
 	}
 
-	let { crumbs = ['octant'] }: Props = $props();
+	let { crumbs = [{ label: 'octant' }], pills }: Props = $props();
 </script>
 
 <header class="hd">
@@ -19,14 +28,17 @@
 				<Icon name="chev" muted />
 			{/if}
 			{#if i === crumbs.length - 1}
-				<b>{crumb}</b>
+				<b class:mono={crumb.mono}>{crumb.label}</b>
+			{:else if crumb.href}
+				<a class:mono={crumb.mono} href={crumb.href}>{crumb.label}</a>
 			{:else}
-				<span>{crumb}</span>
+				<span class:mono={crumb.mono}>{crumb.label}</span>
 			{/if}
 		{/each}
 	</div>
 
 	<div class="r">
+		{#if pills}{@render pills()}{/if}
 		<RateMeter />
 		<Pill title="Command palette — arrives in Phase 9">
 			<Icon name="search" />⌘K
@@ -57,11 +69,23 @@
 		gap: 6px;
 		color: var(--tx2);
 		min-width: 0;
+		overflow: hidden;
 	}
 
 	.bc b {
 		color: var(--tx);
 		font-weight: 500;
+		white-space: nowrap;
+	}
+
+	.bc a,
+	.bc span {
+		white-space: nowrap;
+		transition: color 120ms;
+	}
+
+	.bc a:hover {
+		color: var(--tx);
 	}
 
 	.r {
@@ -69,5 +93,6 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
+		flex: none;
 	}
 </style>

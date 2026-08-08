@@ -1,7 +1,8 @@
 import type { GraphQLFieldError, SourceError } from '$lib/source/errors';
-import type { CacheQuery } from '$lib/source/query';
+import type { CacheQuery, Fetched } from '$lib/source/query';
 import { store as defaultStore } from '$lib/store';
 import type { Store } from '$lib/store/types';
+import { settle } from './settle';
 
 /**
  * `resource()` — PLAN.md Phase 2, and the reason navigation never waits on the
@@ -139,15 +140,18 @@ export function resource<T>(
 			}
 		}
 
-		const result = await query.run({ signal, etag });
-
-		// The answer is worth keeping even if nobody is waiting for it any more —
-		// a screen navigated away from paid for this, and the next visit should
-		// not pay again. So the store is written before the guard, not after.
-		if (result.ok && result.modified) {
-			await store.put(query.key, result.data, { etag: result.etag }).catch(() => {});
-		} else if (result.ok) {
-			await store.touch(query.key, result.etag).catch(() => {});
+		// Fetching and filing are one shared operation — see `settle()`. Two
+		// components asking for the same address at the same moment, which is
+		// every Tree screen's sidebar and listing, pay for it once.
+		let result: Fetched<T>;
+		try {
+			result = await settle(query, store, etag, signal);
+		} catch {
+			// This caller walked away. Sharing is reference counted, so the request
+			// lives on if anyone else is still waiting for it, and the state is
+			// left exactly as it was.
+			if (mine === generation) loading = false;
+			return;
 		}
 
 		if (mine !== generation) return;

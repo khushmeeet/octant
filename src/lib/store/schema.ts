@@ -35,7 +35,9 @@ export const META = {
 	/** The PAT and the viewer identity it validated as. */
 	auth: 'auth',
 	/** Last known rate-limit state, so the meter is populated before the first query. */
-	rateLimit: 'rateLimit'
+	rateLimit: 'rateLimit',
+	/** Repositories opened before, most recent first. The entry screen's list. */
+	recent: 'recent'
 } as const;
 
 /**

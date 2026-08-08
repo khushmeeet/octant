@@ -34,8 +34,18 @@ export default defineConfig(
 		}
 	},
 	{
-		// Override or add rule settings here, such as:
-		// 'svelte/button-has-type': 'error'
-		rules: {}
+		rules: {
+			/*
+			 * Every internal URL in this app is built by `src/lib/nav/paths.ts`,
+			 * which calls SvelteKit's `resolve()` against a typed route ID — so a
+			 * renamed route fails the type check rather than 404ing at runtime, and
+			 * a base path would land in one file. This rule looks for that call at
+			 * the link itself and cannot see through a function, so it reports every
+			 * `href` and `goto` in the app. Centralising URL construction is the
+			 * stronger version of what it is asking for; `nav/paths.ts` is the file
+			 * to check when reviewing a new link.
+			 */
+			'svelte/no-navigation-without-resolve': 'off'
+		}
 	}
 );

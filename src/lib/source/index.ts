@@ -29,5 +29,6 @@ export { setTokenProvider, type TokenProvider } from './token';
 export { parseRepoRef, type RepoRef } from './types';
 export { getRepo, REPO, type HeadCommit, type RepoSummary } from './repo';
 export { getTree, TREE, type EntryType, type TreeEntry, type TreeListing } from './tree';
+export { getBlob, BLOB, type BlobContent } from './blob';
 export { fromQuery, fromRest, type CacheQuery, type FetchOptions, type Fetched } from './query';
 export { GitHubSource, type Source } from './source';
