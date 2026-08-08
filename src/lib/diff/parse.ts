@@ -84,13 +84,6 @@ export function parsePatch(patch: string): DiffHunk[] {
 	return hunks;
 }
 
-/** How many lines a patch will render, without building them. */
-export function patchLength(hunks: readonly DiffHunk[]): number {
-	let total = 0;
-	for (const hunk of hunks) total += hunk.lines.length + 1;
-	return total;
-}
-
 function span(start: string, length: string | undefined): string {
 	return length === undefined ? start : `${start},${length}`;
 }
