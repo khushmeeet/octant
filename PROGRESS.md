@@ -12,7 +12,7 @@ got to.
 | 0 — Skeleton and auth gate | **Done** | 2026-08-06 |
 | 1 — GraphQL client | **Done** | 2026-08-07 |
 | 2 — Cache and the Source/Store seams | **Done** | 2026-08-07 |
-| 3 — Tree screen | Not started | — |
+| 3 — Tree screen | **Done** | 2026-08-08 |
 | 4 — File and blame | Not started | — |
 | 5 — Log | Not started | — |
 | 6 — Refs | Not started | — |
@@ -380,23 +380,205 @@ non-blob entries are the two things to confirm first with a real token.
 
 ---
 
+## Phase 3 — Tree screen
+
+**Done when:** you can browse a real repository of your own and it feels faster
+than github.com on a second visit. ✅ — on a stubbed repository, and pinned by
+tests. The live-token qualifier under **Verification** still stands.
+
+### What was built
+
+The first real screen, and the routing underneath it.
+
+| File | Role |
+|---|---|
+| `nav/paths.ts` | the URL scheme, and every internal link in the app |
+| `nav/recent.svelte.ts` | repositories opened before — the entry screen's list |
+| `routes/+page.svelte` | the entry screen, replacing the Phase 2 probe |
+| `routes/[owner]/[name]/+page.svelte` | a repository's front page |
+| `routes/[owner]/[name]/tree/[rev]/[...path]/+page.svelte` | a tree at a revision |
+| `tree/TreeScreen.svelte` | the screen: two resources, rows, keyboard, verbs, panel |
+| `ui/VirtualRows.svelte` | fixed-height rows, virtualised against the page's scroller |
+| `ui/FileTree.svelte`, `ui/FileTreeNode.svelte` | the sidebar's contextual tree |
+| `ui/CloneStrip.svelte` | two clone URLs, labelled by what they let you do |
+| `ui/clipboard.ts` | copy, with the `execCommand` fallback |
+| `md/parse.ts` | a small Markdown parser: source in, typed AST out |
+| `md/Markdown.svelte`, `md/MdBlocks.svelte`, `md/MdInline.svelte` | the renderer |
+| `source/blob.ts` | the `Blob` document and `getBlob`, addressed by object ID |
+| `sync/prefetch.ts` | prefetch on hover and on mount |
+| `sync/settle.ts` | fetch and file, as one shared operation |
+
+Reworked: `Shell` gained a `sidebar` region so a screen can fill all five;
+`Sidebar` takes the repository and the route instead of local state, and its
+four nav counts come from the summary Phase 1 was already fetching; `Header`
+takes linked breadcrumbs and a screen's own pills; `VerbRow` verbs can be links,
+because a verb that resolves in under 50ms is either local work or something the
+browser does. `format.ts` gained `ago`, `bytes`, `kilobytes`.
+
+**Two resources, in parallel, never chained.** An unnamed revision is queried as
+the literal `HEAD` rather than resolved to the default branch first. Waiting for
+the repository summary to learn the name of a branch we were about to ask GitHub
+about anyway is a waterfall that buys no information, and it would sit on the
+screen people open most.
+
+**The README is addressed by the blob's own object ID**, which the listing
+already carries. So it is permanent, and it is one cache entry shared across
+every revision where the file did not change — the Phase 2 key scheme paying
+out. It is also the third read on the screen, deliberately behind the listing:
+it is below the fold, so arriving a beat later costs nothing.
+
+### Decisions
+
+**The revision is exactly one percent-encoded path segment.** Git allows a slash
+in a ref name, which is why github.com's own `/tree/release/1.0/src` is
+ambiguous — it consults its ref list to know where the name ends and the path
+begins, and we would have to spend a round trip on the same question. Encoding
+answers it in the URL: `release%2F1.0` is one segment, always. The cost is that
+a github.com URL pasted for a slashed branch reads the wrong way; that is rarer
+than navigating, and it fails visibly.
+
+**`settle()` — fetch and file as one shared operation.** Found by a test that
+failed one run in eight. Phase 1's in-flight sharing collapses identical
+requests, but it stops at the response: between an answer arriving and it
+landing in IndexedDB there is a window where a second reader's cache lookup
+misses and issues the same request again. The sidebar tree and the main listing
+ask for the same directory at the same instant on every Tree screen, and a hover
+prefetch races the click that follows it, so the window is not hypothetical.
+Moving the store write *inside* the shared work closes it. `resource()` and
+`prefetch()` now share one path.
+
+**Markdown is parsed into an AST, never into HTML.** GitHub renders Markdown for
+us over REST and the result would be one `{@html}` from the screen.
+`ARCHITECTURE.md` §11 already lists the token in browser storage against "XSS is
+a real risk", and injecting third-party markup into the document that holds it
+makes that risk strictly worse for a feature not worth it. A tree of typed nodes
+rendered by Svelte cannot inject anything. Raw HTML in a README is stripped and
+images render as their alt text — that is where the badges and centred logos
+live, and `DESIGN.md` §8 does not want them. It is a subset by design, and it
+never throws: anything it does not understand comes out as text.
+
+**Virtualisation is against the page's scroller, not one of its own.** A list
+with its own scrollbar would have forced the README into a second scrolling
+region, and two scrollbars on one screen is a worse answer than any amount of
+implementation. The slice is positioned with padding rather than transforms, so
+nothing moves and the rows keep their place for find-in-page and the focus ring.
+
+**A verb that cannot act is absent.** `PLAN.md` lists Blame in this screen's verb
+row; git has no directory blame and the file screen is Phase 4, so it is not
+there. Permalink appears only where a commit SHA is known, which in Phase 3 is
+the default branch — Phase 6's ref map extends it to the rest. `DESIGN.md` §5
+makes "every verb resolves" the rule, and a verb that greys out is a worse
+answer than a row that is honest about its length.
+
+**Files link out to github.com.** The file screen is Phase 4. `ARCHITECTURE.md`
+§1 says what is out of scope links out, and the same is honest for what is not
+built yet. Phase 4 changes `blobUrl`'s call sites and nothing else.
+
+**Log, Refs and Review are rendered, unreachable, and carry real counts.** No
+stub routes: an item that says which phase builds it beats a link to a page that
+apologises. The counts were already in the repository summary.
+
+**The keyboard cursor starts unset.** A screen you have just opened should not
+claim one of its rows is special; the first `j` or `k` starts at the top.
+Selection carries `aria-current` as well as a tint, so it is not colour alone —
+`DESIGN.md` §9.
+
+**Prefetch stops when headroom is low.** A prefetch is a guess, so it is the
+first thing to give up when the rate limit is tight. Navigation the reader
+actually asked for keeps its quota.
+
+**`nav/` is a new module**, beyond the layout in `ARCHITECTURE.md` §9. The URL
+scheme is read by routes, written by the chrome and followed by the keyboard;
+it is the app's addressing scheme rather than a detail of the UI. Every link in
+it is built with SvelteKit's `resolve()` against a typed route ID, so a renamed
+route directory fails the type check instead of 404ing at runtime. The lint rule
+that wants to see that call at the link itself cannot see through a function, so
+it is turned off in `eslint.config.js` with that note — centralising the
+construction is the stronger version of what it asks for.
+
+**The entry screen lists what you have opened, not what GitHub can show you.**
+A repository list is a fan-out across the API that §7 forbids outright, and the
+account surfaces are out of scope anyway. What is local is free and a better
+answer. It accepts a pasted github.com URL, which is what is usually on the
+clipboard when you arrive there.
+
+### Deliberately deferred
+
+- **"Since your last visit" is three placeholder rows.** Phase 8, as `PLAN.md`
+  allows. The `visits` store is still unwritten: recording last-seen without
+  computing a delta would be data nobody reads, and Phase 8 wants to design both
+  together.
+- **No syntax highlighting**, including in README code blocks. Phase 4 chooses
+  the highlighter and the file screen gets it first; a second implementation
+  here would be one to throw away.
+- **No `..` at the repository root, no breadcrumb-relative filtering.** The
+  filter is this directory only, and the `..` row hides while it is active,
+  because the way out of a search is not one of its results.
+- **The right panel's shape is unreviewed.** `PLAN.md`'s first checkpoint asks
+  whether one screen wants a different order. It has been used for hours, not
+  days — the answer belongs after living with it.
+
+### Verification
+
+`bun run check` (0 errors), `bun run lint` and `bun run build` all pass.
+`bunx playwright test --repeat-each=6` — 114 passed, no flakes. The suite is 19
+tests and now runs in about 25 seconds; it also stubs the webfont CDN, which was
+putting a third party's latency inside every navigation it measures.
+
+Nine tests are new, and the phase is in these:
+
+- the screen carries its repository, clone URLs, README, the three right-panel
+  blocks in fixed order, and sidebar counts;
+- the README renders as Markdown and its raw HTML block does not survive;
+- `j`/`k` move a selection that starts unset, and `enter` opens the row —
+  including `..`, which is a row precisely so the keyboard reaches it;
+- `/` focuses the filter and filtering narrows the listing and its tally;
+- four thousand entries render as a window of under 120 rows, and scrolling the
+  page's own scroller reveals the last of them;
+- hovering a directory warms it, and opening it afterwards costs nothing;
+- expanding the sidebar tree and opening the same directory in the main column
+  is one request, not two;
+- Permalink re-addresses the tree by SHA, and that address is never re-fetched
+  however stale everything around it goes;
+- a branch name with a slash survives the round trip through the URL.
+
+Both themes checked by screenshot at 1440px, and the <1060px breakpoint where
+the right panel hides.
+
+**Still not run against live GitHub.** Three things to confirm with the first
+real token, in this order: `Repository.object(oid:)` returning a `Blob`, which is
+new in this phase; `HEAD` accepted as an `expression` prefix, which the whole
+no-waterfall argument rests on; and `mode` arriving as an integer with `object`
+null on non-blob entries, carried over from Phase 2.
+
+---
+
 ## Carried forward
 
 Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
 
-- **Run every document against a real token** before building a screen on it.
-  `Repo` and `Tree` are schema-checked by hand and against stubs only. This is
-  now blocking Phase 3 rather than merely advisable.
-- **Phase 3** replaces the sidebar's local `active` state with routing, and is
-  the first checkpoint: live with it for a few days before Phase 4.
-- **Phase 3** owns prefetch on hover, and is the first screen that can tell
-  whether an IDB round trip per navigation is felt or not — see the in-memory
-  layer under Phase 2's deferrals.
-- The Phase 0 shell has no keyboard handling at all. `j`/`k`/`enter`/`/`
-  arrive with the first real list in Phase 3; `esc` and `⌘K` in Phase 9.
-- **`resource()` has no pagination.** The log and the PR file list both need
-  cursor walking, and the cache key for page *n* is not obvious. Decide in
-  Phase 5, before Phase 7 needs it too.
+- **Run every document against a real token.** `Repo`, `Tree` and `Blob` are
+  schema-checked by hand and against stubs only. This has been blocking since
+  Phase 2 and is now three documents deep.
+- **Phase 3 is the first checkpoint.** Live with it for a few days before
+  Phase 4, and answer `PLAN.md`'s question: is the right-panel shape right, or
+  does one screen want a different order?
+- **Phase 4** replaces every `blobUrl` link-out with the file screen, and takes
+  over `getBlob` — which already returns `isBinary` and `isTruncated` for the
+  fallbacks `ARCHITECTURE.md` §11 requires.
+- **Phase 6** extends Permalink to non-default branches, once the ref map makes
+  a commit SHA available for any revision.
+- **The in-memory layer is still not needed.** Phase 2 deferred it until a
+  screen could say whether an IDB round trip per navigation is felt. On the Tree
+  screen it is not, at these sizes. Ask again in Phase 5, when the log moves
+  real volume.
+- **`resource()` has no pagination.** Trees do not need it — GitHub returns
+  `Tree.entries` whole, which is why 4,000 rows is a rendering problem and not a
+  fetching one. The log and the PR file list do. Decide in Phase 5, before
+  Phase 7 needs it too.
 - **Eviction has never run under real pressure.** The ceiling is exercised by
   test; the quota path is not, because a headless browser's quota is enormous.
   Watch it once the blob cache has real files in it.
+- **The Markdown parser has no test of its own.** It is covered through the
+  README on the Tree screen, which is the only thing that renders one. If Phase 7
+  gives PR descriptions the same renderer, it earns direct tests.

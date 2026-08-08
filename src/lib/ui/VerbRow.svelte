@@ -4,9 +4,9 @@
 	 *
 	 * Left: the current object's name in tertiary text with a right divider.
 	 * Then the verbs as text buttons, and the copy/utility verb right-aligned.
-	 * Every verb must resolve in under 50ms or it does not belong here.
-	 *
-	 * Phase 0 has no object, so the row renders empty at its correct height.
+	 * Every verb must resolve in under 50ms or it does not belong here, which is
+	 * why a verb is either a local action or a link — never a request the row
+	 * waits on.
 	 */
 	import type { Verb } from './types';
 
@@ -21,17 +21,40 @@
 	let { object, verbs = [], active, utility }: Props = $props();
 </script>
 
-<div class="verbs">
-	<span class="obj">{object ?? 'No object'}</span>
-
-	{#each verbs as verb (verb.id)}
-		<button class="verb" class:on={active === verb.id} onclick={verb.onselect}>
+{#snippet action(verb: Verb, extra: string)}
+	{#if verb.href}
+		<a
+			class="verb {extra}"
+			class:on={active === verb.id}
+			href={verb.href}
+			title={verb.title}
+			target={verb.external ? '_blank' : undefined}
+			rel={verb.external ? 'noopener noreferrer external' : undefined}
+			onclick={verb.onselect}
+		>
+			{verb.label}
+		</a>
+	{:else}
+		<button
+			class="verb {extra}"
+			class:on={active === verb.id}
+			title={verb.title}
+			onclick={verb.onselect}
+		>
 			{verb.label}
 		</button>
+	{/if}
+{/snippet}
+
+<div class="verbs">
+	<span class="obj mono">{object ?? 'No object'}</span>
+
+	{#each verbs as verb (verb.id)}
+		{@render action(verb, '')}
 	{/each}
 
 	{#if utility}
-		<button class="verb sp" onclick={utility.onselect}>{utility.label}</button>
+		{@render action(utility, 'sp')}
 	{/if}
 </div>
 
@@ -55,7 +78,7 @@
 	}
 
 	.obj {
-		font-size: 12px;
+		font-size: 11.5px;
 		color: var(--tx3);
 		padding-right: 10px;
 		margin-right: 4px;
@@ -65,6 +88,9 @@
 		align-items: center;
 		white-space: nowrap;
 		flex: none;
+		max-width: 40%;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.verb {
