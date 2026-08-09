@@ -29,6 +29,8 @@
 	import { copy } from '$lib/ui/clipboard';
 	import { ago, bytes, count, kilobytes } from '$lib/ui/format';
 	import type { Crumb, PanelEntry, Verb } from '$lib/ui/types';
+	import { distinct, setOf } from '$lib/visits/reach';
+	import { sinceLastVisit } from '$lib/visits/since.svelte';
 
 	/**
 	 * The File screen — PLAN.md Phase 4, "the screen the tool exists for".
@@ -64,6 +66,40 @@
 	 * the sidebar's Tree count is real.
 	 */
 	const siblings = resource(() => GitHubSource.getTree(repo, rev, dir));
+
+	/* -------------------------------------------------------------- since -- */
+
+	const since = sinceLastVisit(() => ({ repo, rev, head: summary.data?.head?.oid ?? null }));
+
+	const treeMarks = $derived({ mark: (at: string) => since.mark(at) });
+
+	/** What landed in *this* file, from the comparison the panel already made. */
+	const changedHere = $derived(since.fileChange(path) ?? null);
+
+	/**
+	 * Who touched it, exactly — PLAN.md Phase 8 asks the File screen for "lines
+	 * changed since, and by whom", and the comparison can only answer the first
+	 * half: it lists the range's commits and the range's files, but never which
+	 * commit touched which file.
+	 *
+	 * A path-scoped log answers it, and this is the one screen where that read is
+	 * already spoken for: **it is the exact query the Log verb warms on hover**
+	 * (Phase 4's `Verb.onhover`), under the same key. So the cost is not a new
+	 * request but a hover paid a moment early — and it is asked for only when
+	 * this file is one of the ones that moved, which on a quiet file is never.
+	 */
+	const touched = resource(() => (changedHere ? GitHubSource.getLog(repo, rev, path, null) : null));
+
+	/** The range's commits, as a set, so the log page can be cut down to it. */
+	const inRange = $derived(setOf(since.commitOids));
+
+	const commitsHere = $derived(
+		(touched.data?.items ?? []).filter((commit) => inRange.has(commit.oid))
+	);
+
+	const authorsHere = $derived(
+		distinct(commitsHere.map((commit) => commit.authorLogin ?? commit.authorName))
+	);
 
 	/* --------------------------------------------------------------- code -- */
 
@@ -271,13 +307,39 @@
 		return list;
 	});
 
-	const visit = $derived<PanelEntry[]>([
-		// Real deltas are Phase 8. The block keeps its position and its shape so
-		// the geography is learned now rather than rearranged later.
-		{ key: 'Lines changed', value: '—' },
-		{ key: 'By', value: '—' },
-		{ key: 'Last visit', value: '—' }
-	]);
+	/**
+	 * The repository's block, with this file's own two rows in front of it —
+	 * PLAN.md Phase 8 asks the File screen for "lines changed since, and by
+	 * whom", and the honest answer is both: what happened to this file, and what
+	 * happened around it.
+	 */
+	const visit = $derived.by<PanelEntry[]>(() => {
+		if (!changedHere) return since.rows;
+
+		const rows: PanelEntry[] = [
+			{
+				key: 'Lines changed',
+				value: `+${count(changedHere.additions)} −${count(changedHere.deletions)}`,
+				accent: true
+			}
+		];
+
+		// The log page has not landed, or it reached back past the range without
+		// finding this file in it. Saying nothing beats naming the wrong person.
+		if (authorsHere.length > 0) {
+			rows.push({
+				key: 'By',
+				// Two names is what a 230px column holds. A third would truncate the
+				// second, which is worse than admitting there are more.
+				value: authorsHere.slice(0, 2).join(', ') + (authorsHere.length > 2 ? ' +' : '')
+			});
+			rows.push({ key: 'Commits here', value: count(commitsHere.length) });
+		} else if (touched.loading) {
+			rows.push({ key: 'By', value: '…' });
+		}
+
+		return [...rows, ...since.rows];
+	});
 
 	const about = $derived.by<PanelEntry[]>(() => {
 		const data = file.data;
@@ -350,7 +412,7 @@
 		treeCount={siblings.data?.entries.length ?? null}
 		section="Files"
 	>
-		<FileTree {repo} {rev} hrefRev={address.rev} current={dir} file={path} />
+		<FileTree {repo} {rev} hrefRev={address.rev} current={dir} file={path} marks={treeMarks} />
 	</Sidebar>
 {/snippet}
 
@@ -377,7 +439,7 @@
 {/snippet}
 
 {#snippet panel()}
-	<RightPanel {visit} {about} open={openAgainst} />
+	<RightPanel since={since.label} {visit} {about} open={openAgainst} />
 {/snippet}
 
 <Shell {sidebar} {header} verbs={verbRow} {panel}>

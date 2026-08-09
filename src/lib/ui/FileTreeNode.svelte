@@ -3,8 +3,10 @@
 	import { GitHubSource, type RepoRef, type TreeEntry } from '$lib/source';
 	import { prefetch } from '$lib/sync/prefetch';
 	import { resource } from '$lib/sync/resource.svelte';
+	import Dot from './Dot.svelte';
 	import Icon from './Icon.svelte';
 	import Self from './FileTreeNode.svelte';
+	import type { TreeMarks } from './types';
 
 	/**
 	 * One row of the sidebar's contextual file tree — PLAN.md Phase 3.
@@ -27,11 +29,14 @@
 		current: string;
 		/** The file the main screen is showing, `''` on a tree. */
 		file?: string;
+		/** What landed since your last visit — Phase 8. */
+		marks?: TreeMarks;
 	}
 
-	let { repo, rev, hrefRev, entry, depth, current, file = '' }: Props = $props();
+	let { repo, rev, hrefRev, entry, depth, current, file = '', marks }: Props = $props();
 
 	const isDir = $derived(entry.type !== 'blob');
+	const mark = $derived(marks?.mark(entry.path) ?? null);
 	const onPath = $derived(current === entry.path || current.startsWith(`${entry.path}/`));
 
 	/** A manual toggle, which outranks the path until the path next moves. */
@@ -84,12 +89,15 @@
 			{entry.name}
 		</a>
 	{/if}
+	{#if mark}
+		<Dot title={mark.title} />
+	{/if}
 </div>
 
 {#if open}
 	{#if listing.data}
 		{#each listing.data.entries as child (child.path)}
-			<Self {repo} {rev} {hrefRev} entry={child} depth={depth + 1} {current} {file} />
+			<Self {repo} {rev} {hrefRev} entry={child} depth={depth + 1} {current} {file} {marks} />
 		{/each}
 	{:else if listing.error}
 		<p class="hint" style:padding-left="{17 + depth * 11}px">{listing.error.message}</p>
@@ -106,6 +114,13 @@
 		height: 24px;
 		border-radius: var(--radius-item);
 		min-width: 0;
+		padding-right: 6px;
+	}
+
+	/* The name takes what is left, so the dot sits against the right edge and
+	   every row's dot is in the same place whatever its depth. */
+	.node .name {
+		flex: 1;
 	}
 
 	.node:hover {

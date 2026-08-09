@@ -3,6 +3,7 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import TokenGate from '$lib/auth/TokenGate.svelte';
 	import { session } from '$lib/auth/token.svelte';
+	import { startTick } from '$lib/sync/tick';
 	import { theme } from '$lib/ui/theme.svelte';
 
 	let { children } = $props();
@@ -10,6 +11,16 @@
 	// Client-only (`ssr = false`), so `document` is available at init.
 	theme.init();
 	void session.restore();
+
+	/**
+	 * One timer for the app — PLAN.md Phase 8. It lives here rather than in a
+	 * screen because what it polls is a pinned *set*, not the thing on screen,
+	 * and because a timer per screen would be a timer per navigation.
+	 */
+	$effect(() => {
+		if (session.status !== 'signed-in') return;
+		return startTick();
+	});
 </script>
 
 <svelte:head>

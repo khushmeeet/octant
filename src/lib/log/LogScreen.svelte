@@ -23,6 +23,7 @@
 	import { copy } from '$lib/ui/clipboard';
 	import { ago, count } from '$lib/ui/format';
 	import type { Crumb, PanelEntry, Verb } from '$lib/ui/types';
+	import { sinceLastVisit } from '$lib/visits/since.svelte';
 	import CommitDetail from './CommitDetail.svelte';
 	import Scope from './Scope.svelte';
 	import { tallyAuthors } from './authors';
@@ -57,6 +58,8 @@
 	const rev = $derived(address.rev ?? 'HEAD');
 
 	const summary = resource(() => GitHubSource.getRepo(repo));
+
+	const since = sinceLastVisit(() => ({ repo, rev, head: summary.data?.head?.oid ?? null }));
 	const log = pages<LogCommit>((after) => GitHubSource.getLog(repo, rev, path, after));
 
 	/**
@@ -336,13 +339,26 @@
 		return list;
 	});
 
-	const visit = $derived<PanelEntry[]>([
-		// Real deltas are Phase 8. The block keeps its position and its shape so
-		// the geography is learned now rather than rearranged later.
-		{ key: 'Commits since', value: '—' },
-		{ key: 'In paths you own', value: '—' },
-		{ key: 'Last visit', value: '—' }
-	]);
+	/**
+	 * The repository's block, plus one row the log is uniquely placed to add:
+	 * whether anything landed *in the scope on screen*. The comparison already
+	 * lists the paths, so a path-scoped answer is a lookup rather than a second
+	 * read — which is the whole reason the delta is computed once per repository
+	 * and projected, rather than once per thing you might ask about.
+	 */
+	const visit = $derived.by<PanelEntry[]>(() => {
+		if (!path || !since.any) return since.rows;
+
+		const mark = since.mark(path);
+		return [
+			{
+				key: 'In this scope',
+				value: mark ? `${count(mark.files)} file${mark.files === 1 ? '' : 's'}` : 'Nothing',
+				accent: Boolean(mark)
+			},
+			...since.rows
+		];
+	});
 
 	const about = $derived.by<PanelEntry[]>(() => {
 		const entries: PanelEntry[] = [
@@ -426,7 +442,7 @@
 {/snippet}
 
 {#snippet panel()}
-	<RightPanel {visit} {about} open={openAgainst} />
+	<RightPanel since={since.label} {visit} {about} open={openAgainst} />
 {/snippet}
 
 <Shell {sidebar} {header} verbs={verbRow} {panel}>

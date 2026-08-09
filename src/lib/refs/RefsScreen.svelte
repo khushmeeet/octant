@@ -24,6 +24,7 @@
 	import { copy } from '$lib/ui/clipboard';
 	import { ago, count } from '$lib/ui/format';
 	import type { Crumb, PanelEntry, Verb } from '$lib/ui/types';
+	import { sinceLastVisit } from '$lib/visits/since.svelte';
 	import Kinds from './Kinds.svelte';
 	import RefDetail from './RefDetail.svelte';
 
@@ -57,6 +58,12 @@
 	const kind = $derived(address.kind);
 
 	const summary = resource(() => GitHubSource.getRepo(repo));
+
+	const since = sinceLastVisit(() => ({
+		repo,
+		rev: 'HEAD',
+		head: summary.data?.head?.oid ?? null
+	}));
 	const defaultBranch = $derived(summary.data?.defaultBranch ?? null);
 	const defaultHead = $derived(summary.data?.head ?? null);
 
@@ -425,14 +432,6 @@
 		return list;
 	});
 
-	const visit = $derived<PanelEntry[]>([
-		// Real deltas are Phase 8. The block keeps its position and its shape so
-		// the geography is learned now rather than rearranged later.
-		{ key: 'Refs moved', value: '—' },
-		{ key: 'New tags', value: '—' },
-		{ key: 'Last visit', value: '—' }
-	]);
-
 	const about = $derived.by<PanelEntry[]>(() => {
 		if (selected) {
 			const entries: PanelEntry[] = [
@@ -514,7 +513,7 @@
 {/snippet}
 
 {#snippet panel()}
-	<RightPanel {visit} {about} open={openAgainst} />
+	<RightPanel since={since.label} visit={since.rows} {about} open={openAgainst} />
 {/snippet}
 
 <Shell {sidebar} {header} verbs={verbRow} {panel}>

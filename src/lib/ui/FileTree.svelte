@@ -2,6 +2,7 @@
 	import { GitHubSource, type RepoRef } from '$lib/source';
 	import { resource } from '$lib/sync/resource.svelte';
 	import FileTreeNode from './FileTreeNode.svelte';
+	import type { TreeMarks } from './types';
 
 	/**
 	 * The sidebar's contextual section on the Tree screen — DESIGN.md §5.
@@ -23,16 +24,22 @@
 		current: string;
 		/** The file the main screen is showing, `''` on a tree. */
 		file?: string;
+		/**
+		 * What landed since your last visit — Phase 8. Drilled rather than read
+		 * here, because the answer is one comparison the screen has already paid
+		 * for and a tree that fetched its own would be a second one.
+		 */
+		marks?: TreeMarks;
 	}
 
-	let { repo, rev, hrefRev, current, file = '' }: Props = $props();
+	let { repo, rev, hrefRev, current, file = '', marks }: Props = $props();
 
 	const root = resource(() => GitHubSource.getTree(repo, rev, ''));
 </script>
 
 {#if root.data}
 	{#each root.data.entries as entry (entry.path)}
-		<FileTreeNode {repo} {rev} {hrefRev} {entry} depth={0} {current} {file} />
+		<FileTreeNode {repo} {rev} {hrefRev} {entry} depth={0} {current} {file} {marks} />
 	{/each}
 {:else if root.error}
 	<p class="hint">{root.error.message}</p>

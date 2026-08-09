@@ -650,6 +650,23 @@ function restCommit(oid: string) {
 	};
 }
 
+/* ------------------------------------------- Phase 8: since your last visit -- */
+
+/**
+ * `CODEOWNERS`, exercising the four things the parser has to get right: a
+ * catch-all, an anchored path, a glob, and **last match wins** — `src/compiler.js`
+ * is claimed by `*` on the first line and taken back on the second, and the
+ * second is the one in force. `docs/` matches nothing, which is what keeps the
+ * screen from reporting rules rather than files.
+ */
+const CODEOWNERS = [
+	'# who to bother about what',
+	'*                @rich',
+	'src/compiler.js  @octant-user',
+	'src/*.svelte     @octant-user @rich',
+	'docs/            @simon'
+].join('\n');
+
 /* ---------------------------------------------------- Phase 7: the review -- */
 
 /**
@@ -1015,6 +1032,8 @@ interface Stub {
 	readonly pull: Record<string, number>;
 	/** The REST file endpoint, per `number:page`. The heaviest read in the app. */
 	readonly pullFiles: Record<string, number>;
+	/** `CODEOWNERS` reads, per revision. Every screen consults it, so it is counted. */
+	readonly owners: Record<string, number>;
 	/** Move a pull request's head, as a push does. */
 	push(number: number, oid: string): void;
 	/** Replace the handler for one operation mid-test. */
@@ -1040,6 +1059,7 @@ async function signIn(page: Page): Promise<Stub> {
 	const pulls: Record<string, number> = {};
 	const pull: Record<string, number> = {};
 	const pullFiles: Record<string, number> = {};
+	const owners: Record<string, number> = {};
 
 	/**
 	 * The head a pull request currently reports. Mutable so a test can push to a
@@ -1237,6 +1257,23 @@ async function signIn(page: Page): Promise<Stub> {
 				}
 			});
 		},
+		Owners: (route, variables) => {
+			// The three aliased expressions are one query, which is the whole point
+			// of the document — the stub answers all three and only one has a blob.
+			const rev = String(variables.root ?? '').split(':')[0];
+			owners[rev] = (owners[rev] ?? 0) + 1;
+
+			return json(route, {
+				data: {
+					repository: {
+						github: null,
+						root: { __typename: 'Blob', text: CODEOWNERS, isTruncated: false },
+						docs: null
+					},
+					rateLimit: rateLimit(4989)
+				}
+			});
+		},
 		Pull: (route, variables) => {
 			const number = Number(variables.number ?? 0);
 			pull[String(number)] = (pull[String(number)] ?? 0) + 1;
@@ -1330,6 +1367,7 @@ async function signIn(page: Page): Promise<Stub> {
 		pulls,
 		pull,
 		pullFiles,
+		owners,
 		push(number, oid) {
 			heads.set(number, oid);
 		},
@@ -1383,6 +1421,66 @@ async function expireMutable(page: Page) {
 
 		db.close();
 	});
+}
+
+/**
+ * Write a `visits` record by hand — a previous visit, without having to have
+ * made one. "Since your last visit" is measured from a SHA on disk, so seeding
+ * that SHA is the whole setup for every test of it, and it is the only way to
+ * have a *last* visit that is not also this one.
+ */
+async function seedVisit(page: Page, id: string, sha: string | null) {
+	await page.evaluate(
+		async ({ id, sha }) => {
+			const db = await new Promise<IDBDatabase>((resolve, reject) => {
+				const request = indexedDB.open('octant');
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+
+			await new Promise<void>((resolve, reject) => {
+				const tx = db.transaction('visits', 'readwrite');
+				tx.objectStore('visits').put(
+					{ lastSeenAt: Date.now() - 172_800_000, lastSeenSha: sha, shas: sha ? [sha] : [] },
+					id
+				);
+				tx.oncomplete = () => resolve();
+				tx.onerror = () => reject(tx.error);
+			});
+
+			db.close();
+		},
+		{ id, sha }
+	);
+}
+
+/** Read one back, which is how "the visit was recorded" is asserted. */
+async function readVisit(page: Page, id: string) {
+	return page.evaluate(async (id) => {
+		const db = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open('octant');
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+
+		const record = await new Promise<{ lastSeenSha: string | null; shas?: string[] } | undefined>(
+			(resolve, reject) => {
+				const request = db.transaction('visits', 'readonly').objectStore('visits').get(id);
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			}
+		);
+
+		db.close();
+		return record ?? null;
+	}, id);
+}
+
+const REPO_VISIT = 'repo:sveltejs/svelte';
+
+/** The right panel, which is where every screen says what moved. */
+function context(page: Page) {
+	return page.getByRole('complementary', { name: 'Context' });
 }
 
 /**
@@ -3009,4 +3107,234 @@ test('hovering a row warms the review it opens', async ({ page }) => {
 
 	// The screen it opened asked for nothing it did not already hold.
 	expect(stub.pull['7']).toBe(1);
+});
+
+/* ------------------------------------------ Phase 8: since your last visit -- */
+
+test('a first visit says so, and costs nothing to say', async ({ page }) => {
+	const stub = await signIn(page);
+	await openRepo(page);
+
+	// There is no record, so there is nothing to compare against — and the
+	// screen says which of the two it is, because "first visit" and "nothing
+	// changed" are different answers.
+	await expect(context(page)).toContainText('Last visit');
+	await expect(context(page)).toContainText('First');
+
+	// No comparison, and no CODEOWNERS. The feature is free until it has
+	// something to say.
+	expect(Object.keys(stub.compares)).toHaveLength(0);
+	expect(Object.keys(stub.owners)).toHaveLength(0);
+
+	// …and the visit is recorded, so the next one is a second one. The write is
+	// debounced, which is what keeps a screen you passed through from spending
+	// the record.
+	await expect
+		.poll(async () => (await readVisit(page, REPO_VISIT))?.lastSeenSha, {
+			timeout: 8000
+		})
+		.toBe(HEAD);
+});
+
+test('a second visit says what landed, from exactly one comparison', async ({ page }) => {
+	const stub = await signIn(page);
+
+	// Arrive once so there is a database to seed, then rewrite the record to a
+	// commit nine pushes back and come in again.
+	await openRepo(page);
+	await seedVisit(page, REPO_VISIT, sha(100));
+	await openRepo(page);
+
+	const panel = context(page);
+	await expect(panel).toContainText('Commits since');
+	await expect(panel).toContainText('9');
+	await expect(panel).toContainText('Files since');
+
+	// One request, and it is the only one the whole block costs.
+	await expect.poll(() => stub.compares[`${sha(100)}...${HEAD}`] ?? 0).toBe(1);
+	expect(Object.keys(stub.compares)).toHaveLength(1);
+
+	// The heading carries how long ago, so the numbers have a scale.
+	await expect(panel).toContainText('Since your last visit · 2d');
+});
+
+test('the dots on a listing are projected from that one comparison', async ({ page }) => {
+	const stub = await signIn(page);
+	await openRepo(page);
+	await seedVisit(page, REPO_VISIT, sha(100));
+	await openRepo(page);
+
+	// `src` holds all three changed files; the README was not one of them, and a
+	// row with no news carries no dot.
+	const src = listing(page).getByRole('link', { name: 'src' });
+	await expect(src.getByRole('img')).toHaveAttribute(
+		'aria-label',
+		/3 files changed since your last visit/
+	);
+	await expect(listing(page).getByRole('link', { name: 'README.md' }).getByRole('img')).toHaveCount(
+		0
+	);
+
+	// The sidebar's tree is dotted from the same answer, not a second one.
+	const tree = page.getByRole('navigation', { name: 'Primary' });
+	await expect(
+		tree.getByRole('img', { name: /changed since your last visit/ }).first()
+	).toBeVisible();
+
+	expect(Object.keys(stub.compares)).toHaveLength(1);
+});
+
+test('CODEOWNERS decides which of them are yours, and is read once', async ({ page }) => {
+	const stub = await signIn(page);
+	await openRepo(page);
+	await seedVisit(page, REPO_VISIT, sha(100));
+	await openRepo(page);
+
+	// Three files moved. `src/compiler.js` and `src/App.svelte` are this
+	// account's by the second and third rules; `src/logo.png` falls to the
+	// catch-all, which is somebody else's. Last match wins, so the first line
+	// claiming everything does not make everything yours.
+	await expect(context(page)).toContainText('In paths you own');
+	await expect(context(page).getByText('2', { exact: true }).first()).toBeVisible();
+
+	// One query for the file, however many rules and rows consult it.
+	await expect.poll(() => stub.owners['HEAD'] ?? 0).toBe(1);
+
+	// And the dot on the directory says so, which is where a fact about you
+	// belongs rather than in a second colour.
+	await expect(listing(page).getByRole('link', { name: 'src' }).getByRole('img')).toHaveAttribute(
+		'aria-label',
+		/you own this path/
+	);
+});
+
+test('a rewritten default branch is amber, from the same one request', async ({ page }) => {
+	const stub = await signIn(page);
+	await openRepo(page);
+
+	// The recorded head is still reachable but is no longer an ancestor of the
+	// current one — which GitHub reports as `diverged` rather than `ahead`, and
+	// that single word is the whole of the descendant test.
+	await seedVisit(page, REPO_VISIT, STALE_HEAD);
+	await openRepo(page);
+
+	await expect(context(page)).toContainText('Force pushed');
+	expect(stub.compares[`${STALE_HEAD}...${HEAD}`]).toBe(1);
+});
+
+test('the delta survives walking around inside the repository', async ({ page }) => {
+	const stub = await signIn(page);
+	await openRepo(page);
+	await seedVisit(page, REPO_VISIT, sha(100));
+	await openRepo(page);
+
+	await expect(context(page)).toContainText('Commits since');
+
+	// Into a file and back out. Recording the visit must not empty the block
+	// under the reader, and one record is shared by every screen — so the
+	// comparison is not remade either.
+	await listing(page).getByRole('link', { name: 'src' }).click();
+	await listing(page).getByRole('link', { name: 'compiler.js' }).click();
+	await expect(line(page, 1)).toBeVisible();
+	await expect(context(page)).toContainText('Commits since');
+
+	await page.goBack();
+	await page.goBack();
+	await expect(context(page)).toContainText('Commits since');
+
+	expect(stub.compares[`${sha(100)}...${HEAD}`]).toBe(1);
+	expect(Object.keys(stub.owners)).toHaveLength(1);
+});
+
+test('the file screen says what changed in this file, and who by', async ({ page }) => {
+	const stub = await signIn(page);
+	await openRepo(page);
+	await seedVisit(page, REPO_VISIT, sha(100));
+
+	await openFile(page);
+
+	const panel = context(page);
+	await expect(panel).toContainText('Lines changed');
+	// 12 added and 3 removed, from the comparison's own entry for this path —
+	// not from a second read of the file.
+	await expect(panel).toContainText('+12');
+	await expect(panel).toContainText('−3');
+
+	// And by whom, which the comparison cannot answer: it lists the range's
+	// commits and the range's files but never says which touched which. The
+	// path-scoped log is the intersection, and it is the query the Log verb was
+	// going to warm anyway.
+	await expect(panel).toContainText('By');
+	await expect(panel).toContainText('simon');
+	await expect.poll(() => stub.logs['src/compiler.js'] ?? 0).toBe(1);
+});
+
+test('the review list marks what has moved since you reviewed it', async ({ page }) => {
+	const stub = await signIn(page);
+
+	await openPull(page);
+	await page.getByRole('button', { name: 'Mark reviewed' }).click();
+	await expect(page.getByRole('button', { name: 'Recorded' })).toBeVisible();
+
+	stub.push(7, sha(109));
+	await expireMutable(page);
+	await openPulls(page);
+
+	// No request at all: the records are already on disk and the list is already
+	// carrying every row's head, so "has this moved" is a string comparison over
+	// one prefix scan.
+	const row = pullList(page).getByRole('link', { name: /Rewrite the parser/ });
+	await expect(row.getByRole('img')).toHaveAttribute('aria-label', /Pushed to since you reviewed/);
+
+	const panel = context(page);
+	await expect(panel).toContainText('Reviewed before');
+	await expect(panel).toContainText('Moved since');
+	await expect(panel).toContainText('Never opened');
+
+	// A pull request you have never opened carries no dot.
+	await expect(
+		pullList(page)
+			.getByRole('link', { name: /Type the whole compiler/ })
+			.getByRole('img')
+	).toHaveCount(0);
+});
+
+test('the comparison is addressed by two SHAs, so it is never fetched twice', async ({ page }) => {
+	const stub = await signIn(page);
+	await openRepo(page);
+	await seedVisit(page, REPO_VISIT, sha(100));
+	await openRepo(page);
+
+	await expect(context(page)).toContainText('Commits since');
+	expect(stub.compares[`${sha(100)}...${HEAD}`]).toBe(1);
+
+	// Leave, age everything that revalidates, and come back. Both endpoints are
+	// commit SHAs, so the answer is permanent whatever happens around it.
+	await openRefs(page);
+	await expireMutable(page);
+
+	await openRepo(page);
+	await expect(context(page)).toContainText('Commits since');
+	expect(stub.compares[`${sha(100)}...${HEAD}`]).toBe(1);
+});
+
+test('the background tick revalidates the pinned repository without a navigation', async ({
+	page
+}) => {
+	const stub = await signIn(page);
+	await openRepo(page);
+
+	const before = stub.calls.Repo ?? 0;
+
+	// Nothing is stale, so a tick is a cache read and no request.
+	await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+	await page.waitForTimeout(200);
+	expect(stub.calls.Repo).toBe(before);
+
+	// Past its window it is a conditional revalidation, and it happens while the
+	// screen sits still — which is what ARCHITECTURE.md §11 means by polling
+	// instead of webhooks.
+	await expireMutable(page);
+	await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+	await expect.poll(() => stub.calls.Repo ?? 0).toBe(before + 1);
 });

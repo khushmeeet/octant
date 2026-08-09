@@ -16,7 +16,8 @@ import {
 	MAX_IMMUTABLE_ENTRIES,
 	PUTS_PER_CHECK,
 	QUOTA_PRESSURE,
-	TOUCH_INTERVAL
+	TOUCH_INTERVAL,
+	VISIT_HISTORY
 } from './policy';
 import { INDEX, STORE } from './schema';
 import type { CacheEntry, PutOptions, Store, Visit } from './types';
@@ -120,8 +121,27 @@ export class IdbStore implements Store {
 
 	/* ------------------------------------------------------------ visits -- */
 
+	/**
+	 * Read-modify-write rather than a blind put, because the record carries a
+	 * history now — ARCHITECTURE.md §6's "we keep every head SHA we have seen".
+	 * A visit is written once per screen at most, so the extra read is nothing
+	 * beside what it buys: a SHA we have written down stays addressable after
+	 * the ref that named it has moved off it, which is the whole of force-push
+	 * detection.
+	 */
 	async visit(objectId: string, sha: string | null = null): Promise<void> {
-		const record: Visit = { lastSeenAt: Date.now(), lastSeenSha: sha };
+		const previous = await idbGet<Visit>(STORE.visits, objectId).catch(() => undefined);
+		const seen = previous?.shas ?? [];
+
+		// Re-seeing the same head is a visit, not a push. Only a SHA we have not
+		// recorded before extends the history.
+		const shas = sha && seen[seen.length - 1] !== sha ? [...seen, sha] : seen;
+
+		const record: Visit = {
+			lastSeenAt: Date.now(),
+			lastSeenSha: sha,
+			shas: shas.slice(-VISIT_HISTORY)
+		};
 		await idbPut(STORE.visits, objectId, record);
 	}
 

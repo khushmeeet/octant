@@ -61,8 +61,26 @@ export const FRESHNESS = {
 	/** The triage list. As volatile as the pushes that reorder it. */
 	pulls: 30_000,
 	/** Check runs, while CI is moving. */
-	checks: 15_000
+	checks: 15_000,
+	/**
+	 * `CODEOWNERS`, at a branch. By far the longest window in the app, because
+	 * the file changes when a team reorganises rather than when someone pushes —
+	 * and because every screen consults it, so a short window would make a rarely
+	 * moving file the most-fetched thing here. At a commit SHA it is immutable
+	 * and this is never consulted.
+	 */
+	owners: 600_000
 } as const;
+
+/**
+ * How many head SHAs a `visits` record keeps — ARCHITECTURE.md §6.
+ *
+ * Enough to read a rewritten branch's recent past, small enough that the record
+ * stays one small object. What the history is *for* is finding a SHA that a ref
+ * no longer names, and a SHA ten pushes old is one nobody is still reviewing
+ * against.
+ */
+export const VISIT_HISTORY = 10;
 
 /**
  * A hard ceiling on the immutable store, independent of disk pressure.

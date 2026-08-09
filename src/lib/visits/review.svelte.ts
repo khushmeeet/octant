@@ -2,6 +2,7 @@ import { SvelteMap } from 'svelte/reactivity';
 import type { RepoRef } from '$lib/source/types';
 import { store as defaultStore } from '$lib/store';
 import type { Store, Visit } from '$lib/store/types';
+import { fileVisitPrefix, pullVisitId } from './ids';
 
 /**
  * What we remember about reviewing a pull request — ARCHITECTURE.md §6, in the
@@ -14,7 +15,9 @@ import type { Store, Visit } from '$lib/store/types';
  * depends on, because PLAN.md Phase 7 makes "since my last review" the default
  * view rather than an option, and a default view cannot wait for a later phase.
  *
- * Two records, and they are the same shape the store already had:
+ * Two records, and they are the same shape the store already had. Their ids
+ * moved to `ids.ts` in Phase 8, where every screen that reads them can agree on
+ * what they are called:
  *
  *   `pull:{owner}/{name}:{n}`            when you last reviewed, and at what head
  *   `pull:{owner}/{name}:{n}:f:{path}`   when you marked one file viewed, and at what head
@@ -33,24 +36,18 @@ import type { Store, Visit } from '$lib/store/types';
  * a person saying they are done rather than a screen assuming it.
  */
 
-export function pullVisitId(repo: RepoRef, number: number): string {
-	return `pull:${repo.owner}/${repo.name}:${number}`;
-}
-
-/**
- * `:f:` rather than `:`, so the file records of #12 are not also the records of
- * #120 — a prefix read has no other way to know where the number ends.
- */
-export function fileVisitPrefix(repo: RepoRef, number: number): string {
-	return `${pullVisitId(repo, number)}:f:`;
-}
-
 export interface ReviewMemory {
 	/** The records have been read. Before this, nothing is known — not "nothing". */
 	readonly ready: boolean;
 	/** The head SHA the last time this pull request was marked reviewed. */
 	readonly lastSeenSha: string | null;
 	readonly lastSeenAt: number | null;
+	/**
+	 * Every head this pull request has been marked reviewed at, oldest first —
+	 * Phase 8's recorded head-SHA history. More than one entry means the branch
+	 * has moved under a review that was already done once.
+	 */
+	readonly shas: readonly string[];
 	/** Path → the head SHA it was marked viewed at. */
 	readonly viewedAt: ReadonlyMap<string, string | null>;
 
@@ -146,6 +143,9 @@ export function reviewMemory(
 		get lastSeenAt() {
 			return visit?.lastSeenAt ?? null;
 		},
+		get shas() {
+			return visit?.shas ?? (visit?.lastSeenSha ? [visit.lastSeenSha] : []);
+		},
 		get viewedAt() {
 			return files;
 		},
@@ -180,7 +180,14 @@ export function reviewMemory(
 			const at = address();
 			if (!at) return;
 
-			visit = { lastSeenAt: Date.now(), lastSeenSha: sha };
+			// The history the store keeps is appended to on write; mirroring it here
+			// keeps the panel honest before the write has landed.
+			const seen = visit?.shas ?? (visit?.lastSeenSha ? [visit.lastSeenSha] : []);
+			visit = {
+				lastSeenAt: Date.now(),
+				lastSeenSha: sha,
+				shas: seen[seen.length - 1] === sha ? seen : [...seen, sha]
+			};
 			put(pullVisitId(at.repo, at.number), sha);
 		}
 	};

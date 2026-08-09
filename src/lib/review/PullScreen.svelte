@@ -420,6 +420,14 @@
 		}
 
 		entries.push({ key: 'Files viewed', value: `${count(viewedHere)} of ${count(files.length)}` });
+
+		// The recorded head-SHA history, made visible — Phase 8. More than one
+		// entry means this pull request has been reviewed at more than one head,
+		// which is what a long-running branch looks like from here.
+		if (memory.shas.length > 1) {
+			entries.push({ key: 'Heads reviewed', value: count(memory.shas.length) });
+		}
+
 		return entries;
 	});
 

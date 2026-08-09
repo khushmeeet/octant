@@ -12,6 +12,7 @@
 	import { prefetch } from '$lib/sync/prefetch';
 	import { resource } from '$lib/sync/resource.svelte';
 	import DeltaBar from '$lib/ui/DeltaBar.svelte';
+	import Dot from '$lib/ui/Dot.svelte';
 	import Header from '$lib/ui/Header.svelte';
 	import Pill from '$lib/ui/Pill.svelte';
 	import RightPanel from '$lib/ui/RightPanel.svelte';
@@ -22,6 +23,7 @@
 	import { copy } from '$lib/ui/clipboard';
 	import { ago, count } from '$lib/ui/format';
 	import type { Crumb, PanelEntry, Verb } from '$lib/ui/types';
+	import { reviewsSeen } from '$lib/visits/reviews.svelte';
 	import States from './States.svelte';
 
 	/**
@@ -49,6 +51,18 @@
 
 	const summary = resource(() => GitHubSource.getRepo(repo));
 	const walk = pages<PullEntry>((after) => GitHubSource.getPulls(repo, filter, after));
+
+	/**
+	 * Phase 8's delta for this screen, and the only one in the app that costs no
+	 * request: the records Phase 7 writes when you mark a review done, read as
+	 * one prefix scan, against head SHAs the list is already carrying.
+	 */
+	const seen = reviewsSeen(() => repo);
+
+	/** A row you have reviewed and that has been pushed to since. */
+	function movedSince(entry: PullEntry): boolean {
+		return seen.stateOf(entry.number, entry.headRefOid) === 'moved';
+	}
 
 	/* --------------------------------------------------------------- rows -- */
 
@@ -257,15 +271,20 @@
 		{ label: 'pulls', href: pullsHref(repo) }
 	]);
 
-	const visit = $derived<PanelEntry[]>([
-		// Real deltas are Phase 8. The block keeps its position and its shape so
-		// the geography is learned now rather than rearranged later — the detail
-		// screen is the one place Phase 7 fills it in, because its default view
-		// depends on the record.
-		{ key: 'New since', value: '—' },
-		{ key: 'Awaiting you', value: '—' },
-		{ key: 'Last visit', value: '—' }
-	]);
+	const moved = $derived(walk.items.filter(movedSince));
+	const unseen = $derived(
+		walk.items.filter((entry) => seen.stateOf(entry.number, entry.headRefOid) === 'unseen')
+	);
+
+	const visit = $derived.by<PanelEntry[]>(() => {
+		if (!seen.ready) return [{ key: 'Reviewed before', value: '—' }];
+
+		return [
+			{ key: 'Reviewed before', value: `${count(seen.count)}` },
+			{ key: 'Moved since', value: count(moved.length), accent: moved.length > 0 },
+			{ key: 'Never opened', value: count(unseen.length) }
+		];
+	});
 
 	const about = $derived.by<PanelEntry[]>(() => {
 		if (selected) {
@@ -375,6 +394,7 @@
 
 		<div class="cols" aria-hidden="true">
 			<span class="c-num">#</span>
+			<span class="c-flag"></span>
 			<span class="c-title">Title</span>
 			<span class="c-who">Author</span>
 			<span class="c-ref">Into</span>
@@ -398,6 +418,15 @@
 						onpointerenter={() => warm(entry)}
 					>
 						<span class="num mono">{entry.number}</span>
+						{#if movedSince(entry)}
+							<Dot
+								title="Pushed to since you reviewed it — was {seen
+									.reviewedAt(entry.number)
+									?.slice(0, 7)}"
+							/>
+						{:else}
+							<Dot title="" placeholder />
+						{/if}
 						<span class="title">
 							{entry.title}
 							{#if entry.comments > 0}
@@ -538,6 +567,13 @@
 		font-size: 11px;
 		color: var(--acc-tx);
 		text-align: right;
+	}
+
+	/* Holds the dot column open in the header, so the columns below line up
+	   whether or not a row has news. */
+	.c-flag {
+		width: 5px;
+		flex: none;
 	}
 
 	.c-title,

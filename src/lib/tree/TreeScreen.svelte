@@ -13,6 +13,7 @@
 	import { prefetch } from '$lib/sync/prefetch';
 	import { resource } from '$lib/sync/resource.svelte';
 	import CloneStrip from '$lib/ui/CloneStrip.svelte';
+	import Dot from '$lib/ui/Dot.svelte';
 	import FileTree from '$lib/ui/FileTree.svelte';
 	import Header from '$lib/ui/Header.svelte';
 	import Icon from '$lib/ui/Icon.svelte';
@@ -25,6 +26,7 @@
 	import { copy } from '$lib/ui/clipboard';
 	import { ago, bytes, count, kilobytes } from '$lib/ui/format';
 	import type { Crumb, PanelEntry, Verb } from '$lib/ui/types';
+	import { sinceLastVisit } from '$lib/visits/since.svelte';
 
 	/**
 	 * The Tree screen — PLAN.md Phase 3. The first real screen, end to end.
@@ -69,6 +71,24 @@
 	);
 
 	const readme = resource(() => (readmeEntry ? GitHubSource.getBlob(repo, readmeEntry.oid) : null));
+
+	/* -------------------------------------------------------------- since -- */
+
+	/**
+	 * Phase 8. One comparison against the head we wrote down last time answers
+	 * the panel's first block *and* every dot in the listing — a row's dot is a
+	 * lookup against the paths that comparison already named, never a read of
+	 * its own. On a repository nobody has pushed to, it costs nothing at all.
+	 */
+	const since = sinceLastVisit(() => ({
+		repo,
+		rev,
+		head: summary.data?.head?.oid ?? null
+	}));
+
+	const marks = $derived({
+		mark: (path: string) => since.mark(path)
+	});
 
 	/* --------------------------------------------------------------- rows -- */
 
@@ -266,14 +286,6 @@
 		return list;
 	});
 
-	const visit = $derived<PanelEntry[]>([
-		// Real deltas are Phase 8. The block keeps its position and its shape so
-		// the geography is learned now rather than rearranged later.
-		{ key: 'Commits since', value: '—' },
-		{ key: 'In paths you own', value: '—' },
-		{ key: 'Last visit', value: '—' }
-	]);
-
 	const about = $derived.by<PanelEntry[]>(() => {
 		const data = summary.data;
 		if (!data) return [];
@@ -330,7 +342,7 @@
 		treeCount={tree.data?.entries.length ?? null}
 		section="Files"
 	>
-		<FileTree {repo} {rev} hrefRev={address.rev} current={path} />
+		<FileTree {repo} {rev} hrefRev={address.rev} current={path} {marks} />
 	</Sidebar>
 {/snippet}
 
@@ -357,7 +369,7 @@
 {/snippet}
 
 {#snippet panel()}
-	<RightPanel {visit} {about} open={openAgainst} />
+	<RightPanel since={since.label} visit={since.rows} {about} open={openAgainst} />
 {/snippet}
 
 <Shell {sidebar} {header} verbs={verbRow} {panel}>
@@ -426,12 +438,13 @@
 					{:else if item.entry.type === 'commit'}
 						<div class="row sub" class:sel={index === active} title="Submodule">
 							<Icon name="commit" />
-							<span class="name mono">{item.entry.name}</span>
+							<span class="named"><span class="name mono">{item.entry.name}</span></span>
 							<span class="mode mono">{item.entry.mode}</span>
 							<span class="size mono">submodule</span>
 						</div>
 					{:else}
 						{@const dir = item.entry.type === 'tree'}
+						{@const mark = since.mark(item.entry.path)}
 						<!-- Selection is not carried by colour alone — DESIGN.md §9. -->
 						<a
 							class="row"
@@ -444,7 +457,15 @@
 							onclick={() => (cursor = index)}
 						>
 							<Icon name={dir ? 'folder' : 'file'} />
-							<span class="name mono">{item.entry.name}</span>
+							<!-- The dot sits against the name rather than in a column of its
+							     own: across a 900px row a column would put it an inch of empty
+							     space away from the thing it is about. -->
+							<span class="named">
+								<span class="name mono">{item.entry.name}</span>
+								{#if mark}
+									<Dot title={mark.title} />
+								{/if}
+							</span>
 							<span class="mode mono">{item.entry.mode}</span>
 							<span class="size mono">{bytes(item.entry.byteSize)}</span>
 						</a>
@@ -591,14 +612,27 @@
 		color: var(--acc-tx);
 	}
 
-	.name {
+	/* Name and its dot, taking what is left of the row so the fixed columns
+	   stay right-aligned. */
+	.named {
+		display: flex;
+		align-items: center;
+		gap: 8px;
 		flex: 1;
+		min-width: 0;
+	}
+
+	.name {
 		min-width: 0;
 		font-size: 12px;
 		color: var(--tx);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.row.up .name {
+		flex: 1;
 	}
 
 	.row.dir .name,
