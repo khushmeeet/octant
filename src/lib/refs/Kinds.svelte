@@ -29,11 +29,18 @@
 
 	let { repo, kind, branches, tags, defaultBranch }: Props = $props();
 
-	const items = $derived([
-		{ id: null, label: 'All refs', icon: 'commit' as const, n: total(branches, tags) },
-		{ id: 'branch' as const, label: 'Branches', icon: 'branch' as const, n: branches },
-		{ id: 'tag' as const, label: 'Tags', icon: 'tag' as const, n: tags }
-	]);
+	/**
+	 * A kind the repository does not have is absent rather than shown as zero —
+	 * the same rule the verb rows follow. `null` is *not counted yet*, which is
+	 * a different answer from none and keeps the item where it is until we know.
+	 */
+	const items = $derived(
+		[
+			{ id: null, label: 'All refs', icon: 'commit' as const, n: total(branches, tags) },
+			{ id: 'branch' as const, label: 'Branches', icon: 'branch' as const, n: branches },
+			{ id: 'tag' as const, label: 'Tags', icon: 'tag' as const, n: tags }
+		].filter((item) => item.id === null || item.n !== 0 || kind === item.id)
+	);
 
 	function total(a: number | null, b: number | null): number | null {
 		return a === null && b === null ? null : (a ?? 0) + (b ?? 0);

@@ -121,9 +121,16 @@
 		flex-direction: column;
 		min-height: 0;
 		flex: none;
-		/* A pane, not a second screen: the table keeps most of the height. */
-		height: 210px;
-		max-height: 44%;
+		/*
+		 * A pane, not a second screen — but 210px was reading a commit through a
+		 * letterbox. A message of any substance and a commit of any size both
+		 * arrived pre-scrolled, which turns the pane into a thing you have to
+		 * operate rather than a thing you glance at. This is a dozen files and a
+		 * paragraph without touching the wheel, and the table above it still
+		 * shows more rows than the pane shows files.
+		 */
+		height: 340px;
+		max-height: 52%;
 	}
 
 	.halves {

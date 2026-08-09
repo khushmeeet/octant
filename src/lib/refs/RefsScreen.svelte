@@ -80,6 +80,27 @@
 
 	/* --------------------------------------------------------------- rows -- */
 
+	/**
+	 * How many refs there are, as against how many are loaded. The walk's own
+	 * total is the better answer once it lands; before that — and for the kind a
+	 * filter is not loading at all — the repository summary already knows.
+	 */
+	const branchCount = $derived(branches.total ?? summary.data?.counts.branches ?? null);
+	const tagCount = $derived(tags.total ?? summary.data?.counts.tags ?? null);
+	const refsCount = $derived(
+		branchCount === null && tagCount === null ? null : (branchCount ?? 0) + (tagCount ?? 0)
+	);
+
+	/**
+	 * A repository that has never been tagged has no tags to group, and a
+	 * heading over nothing is a section that reads as a failure to load. So a
+	 * kind is on the screen only once we know there is something under it —
+	 * `null` is *not yet counted* rather than none, which is what keeps the
+	 * branch list from flickering in behind an empty one.
+	 */
+	const hasBranches = $derived(branchCount !== 0);
+	const hasTags = $derived(tagCount !== 0);
+
 	type Row =
 		| { id: string; row: 'group'; label: string; loaded: number; total: number | null }
 		| { id: string; row: 'ref'; entry: RefEntry }
@@ -131,8 +152,8 @@
 			}
 		};
 
-		if (kind !== 'tag') group('branch', 'Branches', shownBranches, branches);
-		if (kind !== 'branch') group('tag', 'Tags', shownTags, tags);
+		if (kind !== 'tag' && hasBranches) group('branch', 'Branches', shownBranches, branches);
+		if (kind !== 'branch' && hasTags) group('tag', 'Tags', shownTags, tags);
 		return list;
 	});
 
@@ -467,17 +488,6 @@
 			{ key: 'Tags', value: count(data.counts.tags) }
 		];
 	});
-
-	/**
-	 * How many refs there are, as against how many are loaded. The walk's own
-	 * total is the better answer once it lands; before that — and for the kind a
-	 * filter is not loading at all — the repository summary already knows.
-	 */
-	const branchCount = $derived(branches.total ?? summary.data?.counts.branches ?? null);
-	const tagCount = $derived(tags.total ?? summary.data?.counts.tags ?? null);
-	const refsCount = $derived(
-		branchCount === null && tagCount === null ? null : (branchCount ?? 0) + (tagCount ?? 0)
-	);
 
 	const failure = $derived(branches.error ?? tags.error ?? summary.error);
 	const nothingLoaded = $derived(branches.items.length === 0 && tags.items.length === 0);

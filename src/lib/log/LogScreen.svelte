@@ -23,8 +23,8 @@
 	import { ago, count } from '$lib/ui/format';
 	import type { Crumb, PanelEntry, Verb } from '$lib/ui/types';
 	import { sinceLastVisit } from '$lib/visits/since.svelte';
+	import Authors from './Authors.svelte';
 	import CommitDetail from './CommitDetail.svelte';
-	import Scope from './Scope.svelte';
 	import { tallyAuthors } from './authors';
 	import { commitGraph } from './graph';
 
@@ -42,9 +42,10 @@
 	 *
 	 * Four reads, none of them chained. The history and the repository summary go
 	 * out together, as on every screen. The scope's own directory listing is
-	 * whatever the Tree or File screen you came from already cached, and it is
-	 * what lets the sidebar move the log sideways. The selected commit's files
-	 * are the fourth, and they are debounced — see `CommitDetail`.
+	 * whatever the Tree or File screen you came from already cached, and it
+	 * answers two things the log cannot answer for itself: whether the scope is
+	 * a file, and which commit this revision resolves to. The selected commit's
+	 * files are the fourth, and they are debounced — see `CommitDetail`.
 	 */
 	interface Props {
 		address: LogAddress;
@@ -64,8 +65,9 @@
 	/**
 	 * The directory the scope sits in — the root when there is no scope. The
 	 * same cache entry the tree screen reads for that directory, so it is a local
-	 * read whenever you arrived from one, and it answers the one question the
-	 * verb row cannot answer for itself: whether the scope is a file.
+	 * read whenever you arrived from one, and it answers the two questions the
+	 * verb row cannot answer for itself: whether the scope is a file, and what
+	 * commit the revision on screen resolves to.
 	 */
 	const listingPath = $derived(path ? (parentPath(path) ?? '') : '');
 	const siblings = resource(() => GitHubSource.getTree(repo, rev, listingPath));
@@ -399,16 +401,15 @@
 		rev={address.rev}
 		logCount={log.total}
 		treeCount={siblings.data?.entries.length ?? null}
-		section="Scope"
+		section="Authors"
 	>
-		<Scope
+		<Authors
 			{repo}
 			hrefRev={address.rev}
 			{path}
-			entries={siblings.data?.entries ?? null}
 			{authors}
 			author={address.author}
-			loading={siblings.loading || log.loading}
+			loading={log.loading}
 		/>
 	</Sidebar>
 {/snippet}

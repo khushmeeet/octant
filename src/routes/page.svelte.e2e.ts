@@ -242,13 +242,21 @@ interface HistoryStub {
 }
 
 /**
- * Nine commits with a real shape — a merge, a side branch that rejoins, and two
- * authors — followed by a hundred linear ones so the log has a second page.
+ * Ten commits with a real shape — two merges, two side branches that rejoin,
+ * and two authors — followed by ninety-nine linear ones so the log has a second
+ * page.
  *
  * The shape is the point. Lanes only mean anything if something opens one and
  * something else closes it: 109 is a merge of 108 and 105, and 105 is a side
  * branch whose parent 104 is also 106's, so lane 1 opens on the first row and
- * merges back six rows later.
+ * merges back five rows later.
+ *
+ * 104 is where the second lane earns its keep. It is itself a merge — of 103
+ * and 100, a side branch off 98 — so the row that takes one branch *in* is the
+ * row that lets the next one *out*, and the column it frees is the column the
+ * new one claims. One row per commit means both happen in the same cell, which
+ * is the case a graph drawn from lane state gets wrong by drawing only the half
+ * it noticed last.
  */
 const STRUCTURED: Omit<HistoryStub, 'n'>[] = [
 	{
@@ -297,7 +305,7 @@ const STRUCTURED: Omit<HistoryStub, 'n'>[] = [
 		deletions: 8
 	},
 	{
-		parents: [103],
+		parents: [103, 100],
 		author: 'rich',
 		headline: 'tidy the compiler',
 		body: '',
@@ -324,20 +332,31 @@ const STRUCTURED: Omit<HistoryStub, 'n'>[] = [
 		deletions: 0
 	},
 	{
-		parents: [100],
+		parents: [99],
 		author: 'rich',
 		headline: 'add the readme',
 		body: '',
 		touches: ['README.md'],
 		additions: 20,
 		deletions: 0
+	},
+	// The side branch 104 merges. It forked from 98, so it is not an ancestor of
+	// 104's first parent and the merge is a real one.
+	{
+		parents: [98],
+		author: 'rich',
+		headline: 'split the tidier out',
+		body: '',
+		touches: ['src/App.svelte'],
+		additions: 14,
+		deletions: 9
 	}
 ];
 
 const HISTORY: HistoryStub[] = [
 	...STRUCTURED.map((commit, i) => ({ ...commit, n: 109 - i })),
-	...Array.from({ length: 100 }, (_, i) => {
-		const n = 100 - i;
+	...Array.from({ length: 99 }, (_, i) => {
+		const n = 99 - i;
 		return {
 			n,
 			parents: n > 1 ? [n - 1] : [],
@@ -1036,12 +1055,18 @@ interface Stub {
 	readonly owners: Record<string, number>;
 	/** Move a pull request's head, as a push does. */
 	push(number: number, oid: string): void;
-	/** Replace the handler for one operation mid-test. */
-	on(
-		operation: string,
-		handler: (route: Route, variables: Record<string, string | number | boolean | null>) => unknown
-	): void;
+	/**
+	 * Replace the handler for one operation mid-test, and hand back the one it
+	 * replaced — so a test that only wants to change half of an operation's
+	 * answer can delegate the other half rather than restating it.
+	 */
+	on(operation: string, handler: Handler): Handler | undefined;
 }
+
+type Handler = (
+	route: Route,
+	variables: Record<string, string | number | boolean | null>
+) => unknown;
 
 /**
  * Stubs the endpoint, signs in through the gate, and lands on the entry screen.
@@ -1068,10 +1093,7 @@ async function signIn(page: Page): Promise<Stub> {
 	 */
 	const heads = new Map(PULLS.map((entry) => [entry.number, entry.headOid]));
 
-	const handlers: Record<
-		string,
-		(route: Route, variables: Record<string, string | number | boolean | null>) => unknown
-	> = {
+	const handlers: Record<string, Handler> = {
 		Viewer: (route) => json(route, { data: { viewer: VIEWER, rateLimit: rateLimit(4999) } }),
 		Repo: (route) => json(route, { data: { repository: REPOSITORY, rateLimit: rateLimit(4998) } }),
 		Tree: (route, variables) => {
@@ -1372,7 +1394,9 @@ async function signIn(page: Page): Promise<Stub> {
 			heads.set(number, oid);
 		},
 		on(operation, handler) {
+			const was = handlers[operation];
 			handlers[operation] = handler;
+			return was;
 		}
 	};
 }
@@ -1809,12 +1833,19 @@ test('the verbs live in the header now, beside the pills they act on', async ({ 
 		'href',
 		'https://github.com/sveltejs/svelte/archive/main.zip'
 	);
-	await expect(banner.getByRole('button', { name: 'Copy path' })).toBeVisible();
 
 	// And the row that used to carry them, with the object's name repeated from
 	// the breadcrumb, is gone.
 	await expect(banner.getByRole('link', { name: 'Files', exact: true })).toHaveCount(0);
 	await expect(banner.getByRole('button', { name: 'Files', exact: true })).toHaveCount(0);
+
+	// The tree carries one verb, and it is the one that does something the
+	// screen cannot. `Copy path` handed back what the breadcrumb is already
+	// spelling out, and `Permalink` re-addressed a listing you are reading; both
+	// are gone from here and both still exist where they answer a question — on
+	// a file, and on a commit.
+	await expect(banner.getByRole('button', { name: 'Copy path' })).toHaveCount(0);
+	await expect(banner.getByRole('link', { name: 'Permalink' })).toHaveCount(0);
 });
 
 test('the context panel collapses, and stays collapsed across a reload', async ({ page }) => {
@@ -1953,19 +1984,24 @@ test('the sidebar tree expands, and shares the listing it already paid for', asy
 	expect(stub.trees.src).toBe(1);
 });
 
-test('permalink re-addresses the tree by SHA, and the SHA is permanent', async ({ page }) => {
+test('a tree addressed by SHA is permanent, however stale the branch has gone', async ({
+	page
+}) => {
 	const stub = await signIn(page);
 	await openRepo(page);
 
-	await page.getByRole('link', { name: 'Permalink' }).click();
-	await expect(page).toHaveURL(`/sveltejs/svelte/tree/${HEAD}`);
+	// The tree stopped carrying a Permalink verb of its own — a listing you are
+	// already reading does not need a second address in the chrome — but the
+	// address it made is still an address, and it is still the permanent one.
+	await page.goto(`/sveltejs/svelte/tree/${HEAD}`);
+	await expect(listing(page).getByRole('link', { name: 'README.md' })).toBeVisible();
 
 	// A different address, so it is fetched once...
 	await expect.poll(() => stub.trees['']).toBe(2);
 
 	// ...and then never again, however stale everything around it has gone. That
-	// is the whole point of the verb: a named branch has a freshness window and
-	// a SHA does not.
+	// is the whole point: a named branch has a freshness window and a SHA does
+	// not.
 	await expireMutable(page);
 	await page.goto('/sveltejs/svelte/tree/main');
 	await expect(listing(page).getByRole('link', { name: 'README.md' })).toBeVisible();
@@ -1973,9 +2009,6 @@ test('permalink re-addresses the tree by SHA, and the SHA is permanent', async (
 	await expect(listing(page).getByRole('link', { name: 'README.md' })).toBeVisible();
 
 	expect(stub.trees['']).toBe(3);
-
-	// On a permanent address there is nothing left to make permanent.
-	await expect(page.getByRole('link', { name: 'Permalink' })).toHaveCount(0);
 });
 
 /* ------------------------------------------- Phase 4: the file and blame -- */
@@ -2315,11 +2348,28 @@ test('the graph opens a lane for a merge and closes it where it rejoins', async 
 	// ...carries down beside the spine while 105 is reached...
 	await expect(rows.nth(4).locator('.graph')).toHaveText('│●');
 
-	// ...and closes into 104, which is the parent both sides share.
-	await expect(rows.nth(5).locator('.graph')).toHaveText('●╯');
+	// ...and closes into 104, which is the parent both sides share. 104 is a
+	// merge in its own right, so the column 105 gave back is the column 100
+	// takes: a branch arrives from above and another leaves below, in one cell,
+	// and `┤` is the character that says both. Drawn as a plain close it would
+	// claim the lane ends here, and the four rows of `│` under it would be
+	// running from nothing.
+	await expect(rows.nth(5).locator('.graph')).toHaveText('●┤');
+
+	// The reopened lane is a lane like any other: it carries down...
+	await expect(rows.nth(6).locator('.graph')).toHaveText('●│');
+	await expect(rows.nth(8).locator('.graph')).toHaveText('●│');
+
+	// ...reaches 100...
+	await expect(rows.nth(9).locator('.graph')).toHaveText('│●');
+
+	// ...and closes into 98, which both sides share — 99 is only the row before
+	// it, still on the spine with the other lane running past.
+	await expect(rows.nth(10).locator('.graph')).toHaveText('●│');
+	await expect(rows.nth(11).locator('.graph')).toHaveText('●╯');
 
 	// Below the join there is one lane and it stays one lane.
-	await expect(rows.nth(6).locator('.graph')).toHaveText('●');
+	await expect(rows.nth(12).locator('.graph')).toHaveText('●');
 });
 
 test('j and k move a selection that starts unset, and the pane fills in two beats', async ({
@@ -2450,21 +2500,18 @@ test('the log scopes to a path, and the total follows the scope', async ({ page 
 	expect(stub.logs['src/compiler.js']).toBe(1);
 });
 
-test('the sidebar re-scopes the log, and the author filter says what it covers', async ({
-	page
-}) => {
+test('the log sidebar is the author filter, and it says what it covers', async ({ page }) => {
 	await signIn(page);
 	await openLog(page);
 
 	const sidebar = page.getByRole('navigation', { name: 'Primary' });
 
-	// Scope is a segment: it changes the address and the total.
-	await sidebar.getByRole('link', { name: 'README.md' }).click();
-	await expect(page).toHaveURL('/sveltejs/svelte/log/HEAD/README.md');
-	await expect(commitLog(page).getByRole('link')).toHaveCount(3);
-
-	await sidebar.getByRole('link', { name: 'Whole repository' }).click();
-	await expect(page).toHaveURL(LOG);
+	// The section used to lead with a second file tree — the scope's directory,
+	// listed so the log could be moved sideways from here. It was a tree on a
+	// screen about history, and it pushed the one control that belongs here
+	// below the fold.
+	await expect(sidebar.getByRole('link', { name: 'Whole repository' })).toHaveCount(0);
+	await expect(sidebar.getByRole('link', { name: 'README.md' })).toHaveCount(0);
 
 	// Author is a parameter: it narrows the view of the same address, and it is
 	// honest about reaching only as far as what is loaded.
@@ -2473,6 +2520,13 @@ test('the sidebar re-scopes the log, and the author filter says what it covers',
 	await expect(commitLog(page).getByRole('link')).toHaveCount(3);
 	await expect(page.getByRole('main')).toContainText('3 of 50 loaded · 109 commits');
 	await expect(page.getByRole('banner').getByText('simon')).toBeVisible();
+
+	// Re-scoping did not go anywhere: the breadcrumb walks the path, and it
+	// keeps the author it was narrowed to on the way.
+	await page.goto('/sveltejs/svelte/log/HEAD/src/compiler.js');
+	await expect(commitLog(page).getByRole('link')).toHaveCount(4);
+	await page.getByRole('banner').getByRole('link', { name: 'src', exact: true }).click();
+	await expect(page).toHaveURL('/sveltejs/svelte/log/HEAD/src');
 });
 
 test('a further page is fetched once, and walking back down it is free', async ({ page }) => {
@@ -2589,6 +2643,48 @@ test('branches and tags are one screen, and the sidebar reaches it', async ({ pa
 	await expect(panel.getByRole('heading').nth(0)).toHaveText('Since your last visit');
 	await expect(panel.getByRole('heading').nth(1)).toHaveText('About');
 	await expect(panel.getByRole('heading').nth(2)).toHaveText('Open against it');
+});
+
+test('a repository that has never been tagged has no tags section', async ({ page }) => {
+	const stub = await signIn(page);
+
+	// The counts and the walk have to agree, because either one on its own is
+	// enough to keep a heading on screen.
+	stub.on('Repo', (route) =>
+		json(route, {
+			data: {
+				repository: { ...REPOSITORY, tags: { totalCount: 0 } },
+				rateLimit: rateLimit(4998)
+			}
+		})
+	);
+	const walk = stub.on('Refs', (route, variables) => {
+		if (String(variables.prefix ?? '') !== 'refs/tags/') return walk?.(route, variables);
+		return json(route, {
+			data: {
+				repository: {
+					refs: {
+						totalCount: 0,
+						pageInfo: { hasNextPage: false, endCursor: null },
+						nodes: []
+					}
+				},
+				rateLimit: rateLimit(4992)
+			}
+		});
+	});
+
+	await openRefs(page, REFS);
+
+	// A heading over nothing reads as a section that failed to load. Branches
+	// are all there is, so branches are all the screen says.
+	await expect(refList(page)).toContainText('Branches');
+	await expect(refList(page)).not.toContainText('Tags');
+
+	// And the sidebar does not offer a scope with nothing in it either.
+	const sidebar = page.getByRole('navigation', { name: 'Primary' });
+	await expect(sidebar.getByRole('link', { name: /^Branches/ })).toBeVisible();
+	await expect(sidebar.getByRole('link', { name: /^Tags/ })).toHaveCount(0);
 });
 
 test('ahead and behind are read the right way round, and are not the API order', async ({
@@ -2763,21 +2859,22 @@ test('permalink now works on a branch that is not the default one', async ({ pag
 	await signIn(page);
 
 	// Phases 3 to 5 hid the verb here: the only commit SHA a screen held came
-	// from the repository summary's HEAD, which is the default branch's.
-	await page.goto(`/sveltejs/svelte/tree/${encodeURIComponent('release/1.0')}/src`);
-	await expect(listing(page).getByRole('link', { name: 'compiler.js' })).toBeVisible();
-
-	await expect(page.getByRole('link', { name: 'Permalink' })).toHaveAttribute(
-		'href',
-		`/sveltejs/svelte/tree/${sha(101)}/src`
-	);
-
-	// The file screen resolves the same expression in the same round trip.
+	// from the repository summary's HEAD, which is the default branch's. The
+	// file screen resolves the expression it was already sending, in the same
+	// round trip, so the SHA it addresses is `release/1.0`'s and not `main`'s.
 	await page.goto(`/sveltejs/svelte/blob/${encodeURIComponent('release/1.0')}/src/compiler.js`);
 	await expect(line(page, 1)).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Permalink' })).toHaveAttribute(
 		'href',
 		`/sveltejs/svelte/blob/${sha(101)}/src/compiler.js`
+	);
+
+	// The log resolves it the same way, from the listing it reads for the scope.
+	await page.goto(`/sveltejs/svelte/log/${encodeURIComponent('release/1.0')}/src/compiler.js`);
+	await expect(commitLog(page).getByRole('link').first()).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Permalink' })).toHaveAttribute(
+		'href',
+		`/sveltejs/svelte/log/${sha(101)}/src/compiler.js`
 	);
 });
 
