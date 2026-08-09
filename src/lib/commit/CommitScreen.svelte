@@ -24,6 +24,7 @@
 	import { copy } from '$lib/ui/clipboard';
 	import { ago, count } from '$lib/ui/format';
 	import type { Crumb, PanelEntry, Verb } from '$lib/ui/types';
+	import { sinceLastVisit } from '$lib/visits/since.svelte';
 
 	/**
 	 * One commit, and what it changed — PLAN.md Phase 5's "`enter` opens the
@@ -50,6 +51,12 @@
 	const rev = $derived(address.rev);
 
 	const summary = resource(() => GitHubSource.getRepo(repo));
+
+	const since = sinceLastVisit(() => ({
+		repo,
+		rev: 'HEAD',
+		head: summary.data?.head?.oid ?? null
+	}));
 	const commit = resource(() => GitHubSource.getCommit(repo, rev));
 
 	const data = $derived(commit.data);
@@ -117,14 +124,6 @@
 		{ label: repo.name, href: treeHref(repo, null, '') },
 		{ label: 'commits', href: logHref(repo, null, '') },
 		{ label: data?.abbreviatedOid ?? rev.slice(0, 7), mono: true }
-	]);
-
-	const visit = $derived<PanelEntry[]>([
-		// Real deltas are Phase 8. The block keeps its position and its shape so
-		// the geography is learned now rather than rearranged later.
-		{ key: 'Seen before', value: '—' },
-		{ key: 'In paths you own', value: '—' },
-		{ key: 'Last visit', value: '—' }
 	]);
 
 	const about = $derived.by<PanelEntry[]>(() => {
@@ -212,7 +211,7 @@
 {/snippet}
 
 {#snippet panel()}
-	<RightPanel {visit} {about} open={openAgainst} />
+	<RightPanel since={since.label} visit={since.rows} {about} open={openAgainst} />
 {/snippet}
 
 <Shell {sidebar} {header} verbs={verbRow} {panel}>

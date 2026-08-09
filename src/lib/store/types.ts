@@ -28,6 +28,20 @@ export interface Visit {
 	lastSeenAt: number;
 	/** What was current at the time, so the delta has a base. */
 	lastSeenSha: string | null;
+	/**
+	 * Every head we have recorded for this object, oldest last, bounded — the
+	 * "recorded head-SHA history" of ARCHITECTURE.md §6.
+	 *
+	 * `lastSeenSha` alone answers "what has landed since"; the history answers
+	 * "what did this object look like the times before that", which is what
+	 * makes a rewritten branch legible: GitHub keeps a force-pushed SHA
+	 * reachable, so a SHA we wrote down stays addressable even after the ref
+	 * that named it has moved off it.
+	 *
+	 * Optional because records written before Phase 8 do not have one. A missing
+	 * history is not an empty one, and neither is a failure.
+	 */
+	shas?: string[];
 }
 
 export interface PutOptions {

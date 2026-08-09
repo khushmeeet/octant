@@ -4,6 +4,7 @@ import { getBlob, getFile, type BlobContent, type FileContent } from './blob';
 import { getCommit, type CommitDetail } from './commit';
 import { getCompare, type CompareResult } from './compare';
 import { getLog, type LogPage } from './log';
+import { getOwners, type OwnersFile } from './owners';
 import { getPull, type PullDetail } from './pull';
 import { getPullFiles, type PullFilesPage } from './pull-files';
 import { getPulls, type PullFilter, type PullsPage } from './pulls';
@@ -116,6 +117,12 @@ export interface Source {
 		at: PullDiffAt,
 		after?: string | null
 	): CacheQuery<PullFilesPage>;
+
+	/**
+	 * `CODEOWNERS`, from whichever of its three homes has it — one query, three
+	 * aliased expressions, no fan-out. What decides which paths are yours.
+	 */
+	getOwners(ref: RepoRef, rev: string): CacheQuery<OwnersFile>;
 }
 
 /**
@@ -277,6 +284,22 @@ export const GitHubSource: Source = {
 					: mutableKey('pullfiles', ref, `${number}:p${page}`),
 			maxAge: FRESHNESS.pull,
 			run: (options) => getPullFiles(ref, number, page, options)
+		};
+	},
+
+	getOwners(ref, rev) {
+		return {
+			// `revKey` as everywhere else: at a branch it revalidates on the longest
+			// window in the app, at a commit SHA it is permanent.
+			//
+			// ARCHITECTURE.md §6 says "cached against the tree SHA that produced
+			// it". Keying on the revision is the same idea and a cheaper one: the
+			// *root* tree SHA moves with every commit that changes anything, so
+			// keying on it would re-fetch a file that had not changed on every
+			// push, which is the opposite of what §6 is asking for.
+			key: revKey('owners', ref, rev),
+			maxAge: FRESHNESS.owners,
+			run: (options) => getOwners(ref, rev, options).then(fromQuery)
 		};
 	}
 };

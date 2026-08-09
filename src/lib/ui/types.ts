@@ -29,11 +29,23 @@ export interface Verb {
 	title?: string;
 }
 
+/**
+ * What a list needs in order to dot its rows — Phase 8.
+ *
+ * A function rather than a set, so the caller keeps the index and the list
+ * keeps none of it. `null` is the common answer and costs a lookup.
+ */
+export interface TreeMarks {
+	mark(path: string): { owned: boolean; title: string } | null;
+}
+
 /** One key/value row in a right-panel block. */
 export interface PanelEntry {
 	key: string;
 	value: string;
 	/** Indigo — this concerns you. */
 	accent?: boolean;
+	/** Amber — a force push you have not seen. DESIGN.md §3, one meaning only. */
+	warn?: boolean;
 	mono?: boolean;
 }

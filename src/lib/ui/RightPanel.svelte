@@ -41,7 +41,9 @@
 			{#each block.rows as row (row.key)}
 				<div class="kv">
 					<span class:mono={row.mono}>{row.key}</span>
-					<span class:accent={row.accent} class:mono={row.mono}>{row.value}</span>
+					<span class:accent={row.accent} class:warn={row.warn} class:mono={row.mono}
+						>{row.value}</span
+					>
 				</div>
 			{/each}
 		{/if}
@@ -92,6 +94,10 @@
 
 	.accent {
 		color: var(--acc-tx) !important;
+	}
+
+	.warn {
+		color: var(--wn) !important;
 	}
 
 	.mono {

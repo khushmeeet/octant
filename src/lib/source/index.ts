@@ -77,6 +77,7 @@ export {
 	type ThreadSide
 } from './pull';
 export { getPullFiles, pullFilesTruncated, type PullFilesPage } from './pull-files';
+export { getOwners, OWNERS, OWNERS_PATHS, type OwnersFile } from './owners';
 export { NO_CHECKS, type CheckRun, type CheckState, type CheckSummary } from './checks';
 export { commitOid, type RevisionNode } from './revision';
 export {

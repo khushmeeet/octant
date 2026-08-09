@@ -3,6 +3,7 @@ import type { SourceError } from '$lib/source/errors';
 import { idbDelete, idbGet, idbPut } from '$lib/store/idb';
 import { META, STORE } from '$lib/store/schema';
 import { rate } from '$lib/sync/rate.svelte';
+import { forgetRepoMemories } from '$lib/visits/repo.svelte';
 import { validateToken, type Viewer } from './validate';
 
 /**
@@ -91,6 +92,11 @@ export const session = {
 		record = null;
 		status = 'signed-out';
 		rate.clear();
+		// "Since your last visit" is measured from when *this* session arrived, and
+		// that is held in memory. Signing out ends the session, so it ends too —
+		// otherwise the next person to sign in inherits somebody else's arrival.
+		// The records on disk are untouched: they are what a next visit is since.
+		forgetRepoMemories();
 		await idbDelete(STORE.meta, META.auth).catch(() => {});
 	}
 } satisfies TokenProvider & Record<string, unknown>;

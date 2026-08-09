@@ -26,6 +26,7 @@
 	import { copy } from '$lib/ui/clipboard';
 	import { ago, count } from '$lib/ui/format';
 	import type { Crumb, PanelEntry, Verb } from '$lib/ui/types';
+	import { sinceLastVisit } from '$lib/visits/since.svelte';
 
 	/**
 	 * `base...head` — PLAN.md Phase 6's Compare and "Log since previous", which
@@ -56,6 +57,12 @@
 	const head = $derived(address.head);
 
 	const summary = resource(() => GitHubSource.getRepo(repo));
+
+	const since = sinceLastVisit(() => ({
+		repo,
+		rev: 'HEAD',
+		head: summary.data?.head?.oid ?? null
+	}));
 	const comparison = resource(() =>
 		base && head ? GitHubSource.getCompare(repo, base, head) : null
 	);
@@ -139,14 +146,6 @@
 		{ label: range, mono: true }
 	]);
 
-	const visit = $derived<PanelEntry[]>([
-		// Real deltas are Phase 8. The block keeps its position and its shape so
-		// the geography is learned now rather than rearranged later.
-		{ key: 'Seen before', value: '—' },
-		{ key: 'In paths you own', value: '—' },
-		{ key: 'Last visit', value: '—' }
-	]);
-
 	const about = $derived.by<PanelEntry[]>(() => {
 		if (!data) return [];
 		return [
@@ -228,7 +227,7 @@
 {/snippet}
 
 {#snippet panel()}
-	<RightPanel {visit} {about} open={openAgainst} />
+	<RightPanel since={since.label} visit={since.rows} {about} open={openAgainst} />
 {/snippet}
 
 <Shell {sidebar} {header} verbs={verbRow} {panel}>

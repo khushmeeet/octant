@@ -41,6 +41,16 @@ export function ago(iso: string, now = Date.now()): string {
 }
 
 /**
+ * The same, for a time we hold as epoch milliseconds rather than as a string —
+ * which is how the `visits` store records one. Round-tripping through an ISO
+ * string to ask "how long ago" was the alternative, and it is a lie about where
+ * the value came from.
+ */
+export function agoAt(epochMs: number, now = Date.now()): string {
+	return ago(new Date(epochMs).toISOString(), now);
+}
+
+/**
  * Byte sizes as git tools write them. Binary units, because a blob's size is
  * a fact about storage, and one decimal place, because the column is 72px wide
  * and the second one has never told anybody anything.

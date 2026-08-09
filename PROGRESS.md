@@ -17,7 +17,7 @@ got to.
 | 5 — Log | **Done** | 2026-08-08 |
 | 6 — Refs | **Done** | 2026-08-08 |
 | 7 — Review | **Done** | 2026-08-09 |
-| 8 — Since your last visit | Not started | — |
+| 8 — Since your last visit | **Done** | 2026-08-09 |
 | 9 — Command palette | Not started | — |
 | 10 — OAuth | Not started | — |
 
@@ -1414,15 +1414,261 @@ that silently stops at 100 files.
 
 ---
 
+## Phase 8 — Since your last visit
+
+**Done when:** you open the app after two days away and it tells you what moved
+without you asking. ✅ — on a stubbed repository, and pinned by tests. The
+live-token qualifier under **Verification** still stands.
+
+### What was built
+
+No new screens. Every screen already had the block; this is the phase that
+fills it, and the dots and the ownership and the tick that keeps it moving.
+
+| File | Role |
+|---|---|
+| `visits/ids.ts` | the `visits` object-id scheme, in one place |
+| `visits/repo.svelte.ts` | `repoMemory()` — when you arrived, shared by every screen |
+| `visits/since.svelte.ts` | `sinceLastVisit()` — the delta, and the panel rows every screen shows |
+| `visits/owners.ts` | `CODEOWNERS` parsed, and what "yours" means |
+| `visits/reach.ts` | the indexes a dot is a lookup against |
+| `visits/reviews.svelte.ts` | the triage list's delta, from records and no request |
+| `source/owners.ts` | the `Owners` document — three aliased expressions, one query |
+| `sync/tick.ts` | the background revalidation tick, for a pinned set |
+| `ui/Dot.svelte` | the change dot |
+
+Reworked: `Store.visit` keeps a bounded head-SHA history and is a
+read-modify-write for it; `Visit` gained `shas`; `Source` grew from twelve
+methods to thirteen; `policy.ts` gained `FRESHNESS.owners` and `VISIT_HISTORY`;
+`PanelEntry` gained a `warn` tone and `RightPanel` renders it; `format.ts` gained
+`agoAt`; `FileTree` and `FileTreeNode` take marks; `visits/review.svelte.ts` lost
+its id helpers to `ids.ts` and exposes the history; `signOut` clears the
+in-memory arrivals; the layout owns one timer.
+
+**The whole feature is one comparison.** We wrote down the head SHA you last
+saw, GitHub will diff any two SHAs, so `compare(lastSeenSha, head)` answers the
+panel, the dots, the ownership count and the force-push verdict together — from
+a read addressed by two commit SHAs, which makes it permanent. ARCHITECTURE.md
+§3 names this as the reason the architecture works without a server; this is the
+phase that spends it.
+
+### Decisions
+
+**One record per repository, and the delta is projected onto rows.** The
+alternative — a record per directory — is more precise and much worse: each
+directory would have a different base SHA, so browsing a tree would be one
+comparison per directory, sharing nothing. ARCHITECTURE.md §6 already describes
+the cheap shape, and it is easy to read past: *"Repo: commits landed since… Tree
+row: a dot if the directory contains such a commit."* The row's answer is a
+projection of the repository's, not a question of its own. So a dot is a `Map`
+lookup against the paths the one comparison already listed, and a four-thousand
+row tree costs four thousand hashes and no requests — which is what keeps this
+inside ARCHITECTURE.md §7's rule that nothing may fan out across a repository.
+
+**The base does not move while you are here.** `repoMemory` is a registry at
+module scope, read once per page session and shared by every screen, and
+recording the visit deliberately does not update what is on screen. Without
+that, the block would empty the instant you acted on it: open the tree, see "9
+commits since", click into one of them, come back, and it says nothing. Walking
+Tree → File → Log → Refs now shows the same answer on all four, and one record
+is written rather than four.
+
+**Recording is debounced on view, and this is the opposite of Phase 7.** That
+asymmetry is the point and it is written down in both files. Looking at a tree
+*is* seeing it, so two seconds on screen spends the record. Looking at a pull
+request is not reviewing it, so the Review screen still records by hand — and if
+it did not, the "since my last review" diff would empty before you had read a
+line of it.
+
+**`CODEOWNERS` is one query with three aliased expressions.** GitHub looks in
+`.github/`, the root and `docs/`, first match wins. That could have been three
+round trips, or a listing of two directories we have no other reason to read.
+GraphQL resolves as many expressions as a document names, so it is one request —
+the same move `revision.ts` made in Phase 6, and it matters more here because
+ownership is consulted by every screen.
+
+**It is keyed by revision, not by tree SHA, and §6 is wrong about this.**
+ARCHITECTURE.md §6 says `CODEOWNERS` should be "cached against the tree SHA that
+produced it". The *root* tree SHA changes on every commit that changes anything,
+so keying on it would re-fetch a file that had not moved on every single push —
+the opposite of what §6 is asking for. `revKey` on the revision gives one mutable
+entry per repository on the longest freshness window in the app (ten minutes),
+and a permanent one at a commit SHA. Same answer, cheaper.
+
+**Ownership is read only once there is a delta to attribute.** There is nothing
+to colour on a repository nobody has pushed to, so there is nothing to ask. It
+is read *beside* the comparison rather than after it — both are known to be
+wanted the moment the record says the head has moved, so chaining them would be
+a waterfall for no information.
+
+**A team you might be in does not make a path yours.** `CODEOWNERS` names
+`@user`, `@org/team` and email addresses; resolving team membership is an
+organisation query, and organisations are out of scope by ARCHITECTURE.md §1. So
+only a login match counts, and a repository whose `CODEOWNERS` names only teams
+owns nothing here. That is a smaller answer than GitHub's and an honest one — the
+alternative is guessing about who you are.
+
+**The parser is a subset, and the failure mode is why that is tolerable.** It
+reads gitignore semantics as far as `CODEOWNERS` uses them: last match wins
+rather than most specific, a slash anywhere but the end anchors to the root, a
+bare name matches at any depth, a bare pattern owns what is under it. A pattern
+it reads too broadly costs an indigo dot on a path you do not own; too narrowly,
+a dot you would have wanted. Neither is a wrong answer *about the code*, which is
+the same bargain the highlighter and the Markdown parser make and would not be
+acceptable in a diff.
+
+**One dot, one meaning, and owning it changes the sentence rather than the
+glyph.** DESIGN.md §3 spends indigo on "this concerns you" once, so a second
+tone or a second shape for an owned path would be spending it twice. The dot
+means *something landed inside this since your last visit*; whether it is yours
+is in its label and in the panel's count, where a fact about you belongs.
+DESIGN.md §9 is satisfied without inventing anything: the dot has an accessible
+name and a tooltip, and the panel says the same number in words.
+
+**The dot sits against the name, not in a column.** A column was tried first and
+is wrong at this width: it puts the dot most of a 900px row away from the thing
+it is about. The name and its dot share the flexible cell, so the fixed Mode and
+Size columns stay where they were.
+
+**Force-push detection is the comparison again, and the history is what the
+phase adds.** Phase 7 found that GitHub answers `ahead` when the head descends
+from the base and `diverged` when it does not — ARCHITECTURE.md §6's descendant
+test, for free. Phase 8 applies the same word to the default branch, which
+nothing was doing, and adds what §6 actually asks for: `Visit.shas`, a bounded
+ring of every head we have recorded. That is what keeps a SHA addressable after
+the ref that named it has moved off it. `visit()` is a read-modify-write now,
+which is one extra read on a record written at most once per screen.
+
+**The Review list's delta costs nothing at all.** Every other screen spends a
+comparison; this one spends a prefix scan of records Phase 7 was already writing,
+against head SHAs the list was already carrying. `visitsUnder` earns its second
+caller, which is why Phase 7 put it on the `Store` rather than reading a key at a
+time.
+
+**The File screen makes one extra read, and it is a hover paid early.**
+PLAN.md asks the File screen for "lines changed since, and by whom". The
+comparison answers the first half exactly and cannot answer the second: it lists
+the range's commits and the range's files but never says which touched which.
+The intersection of a path-scoped log with the range's commit SHAs does — and
+that log is the query the Log verb warms on hover, under the same key. So it is
+not a new request, it is an existing one made a moment sooner, and it is asked
+for only when this file is one of the ones that moved.
+
+**The tick polls one thing, for three repositories.** ARCHITECTURE.md §12 asks
+how many repositories should sync in the background and answers "a pinned set is
+probably right"; the pinned set is the three most recently opened, which is a
+list we already keep. What it revalidates is the repository summary and nothing
+else, because HEAD moving is the event every other part of this phase is a
+consequence of — the comparison re-keys on the new head and the dots reappear
+while the screen sits still. It goes *through* `prefetch()` rather than around
+it, so it inherits all three of that function's rules: never on a tight budget,
+never twice, never observably. It also skips a hidden tab, and it asks
+immediately when one comes forward.
+
+**Every screen shows the repository's block; two add a row of their own.** The
+Log screen adds "In this scope" when a path narrows it, which is a lookup rather
+than a second read. The File screen adds its own two rows in front. Commit and
+Compare show the repository's block unchanged — the object they are about is
+immutable, so "since your last visit" can only sensibly mean the repository, and
+positional consistency is worth more than a bespoke answer. The Pull screen
+keeps Phase 7's block, which is the one place "your last visit" means "your last
+review", plus one row from the new history.
+
+### Deliberately deferred
+
+- **No `..` or ancestor dots.** A dot answers for a path *and everything under
+  it*, so the `..` row would light on almost every visit and say nothing. The
+  panel is where the repository-wide answer lives.
+- **No dots on the four nav items.** PLAN.md says "tree rows and sidebar items";
+  the sidebar items that are tree rows are the file tree's, and those have them.
+  A dot on `Tree` while you are looking at the tree is noise, and the counts are
+  already there.
+- **The Refs screen shows the repository's block, not "refs moved / new tags".**
+  Those need a record of the ref list rather than of a SHA — a different shape of
+  memory, for a question the tag list's own ordering mostly answers. If reading
+  the screen in anger wants it, the record is `refs:{owner}/{name}` and the delta
+  is a set difference.
+- **No delta on the entry screen's recent list.** A number per repository is a
+  comparison per repository, which is the fan-out §7 forbids. The tick keeps
+  those summaries warm; showing "12 new" beside each would not be free.
+- **`CODEOWNERS` truncation is carried but not shown.** `isTruncated` is on the
+  answer; a file past GitHub's blob cap would be a `CODEOWNERS` of some
+  thousands of rules, and disclosing it wants a place to say it that is not the
+  first thing you read.
+- **The tick does not revalidate the screen you are on.** `resource()` already
+  does that on navigation and on staleness. Polling the current screen as well
+  would be two clocks for one answer.
+- **No cross-repository "what moved" view.** That is a fan-out and a Phase 9
+  palette question.
+
+### Verification
+
+`bun run check` (0 errors), `bun run lint` and `bun run build` all pass.
+`bunx playwright test --repeat-each=3` — 231 passed. The suite is 77 tests and
+runs in about 2.5 minutes.
+
+Ten tests are new, and the phase is in these:
+
+- a **first visit** says `First` rather than a dash, and costs nothing to say —
+  no comparison and no `CODEOWNERS` — while still recording, so that a first
+  visit becomes a second one;
+- a **second visit** reports nine commits and three files from **one**
+  comparison, with `Since your last visit · 2d` in the heading;
+- the **dots are projected from that one comparison**: `src` carries "3 files
+  changed since your last visit", the README carries none, the sidebar tree is
+  dotted from the same answer, and there is still exactly one comparison;
+- **`CODEOWNERS` decides which of them are yours** — two of the three, because
+  the last matching rule wins and the catch-all on the first line is overruled;
+  read once, however many rows consult it; and the dot on the directory says so;
+- a **rewritten default branch** is amber, from the same one request — the
+  recorded head is reachable but is not an ancestor, so the range is `diverged`;
+- **the delta survives walking around**: Tree → File → back shows the same block
+  throughout, with one comparison and one `CODEOWNERS` read for the whole walk,
+  which is the thing recording-on-view would otherwise have broken;
+- the **File screen** says `+12 −3` for this file and names both authors, from
+  the path-scoped log the Log verb was going to warm anyway;
+- the **Review list** marks what has moved since you reviewed it, with no request
+  at all, and leaves a pull request you have never opened unmarked;
+- the comparison is **addressed by two SHAs**, so leaving the screen and ageing
+  everything mutable does not fetch it again;
+- the **background tick** does nothing while the entry is fresh and revalidates
+  it once past its window — with no navigation, which is the point.
+
+Both themes checked by screenshot at 1440px — the dotted listing, the file
+screen's two extra rows, the amber force-push row and the marked triage list —
+along with the <1060px breakpoint where the right panel hides and the dots stay.
+
+**One note on the suite.** An early full run had two Phase 5 tests time out at
+five seconds waiting for a first paint, on one of three iterations, under two
+workers on a loaded machine; two subsequent full `--repeat-each=3` runs were
+clean, and both tests pass twelve times out of twelve in isolation. They are
+timeouts rather than assertion failures and no Phase 8 code is on their path, so
+this is recorded rather than chased — but if the log and file screens start
+timing out again, this is where it was first seen.
+
+**Still not run against live GitHub.** One document is new and it has not met a
+real token: `Owners`, whose three aliased `object(expression:)` fields mirror
+`Tree`'s and should be safe in shape. Two behaviours are worth watching on the
+first afternoon there is one. The comparison this phase rests on is the REST
+compare endpoint, which ARCHITECTURE.md §11 caps at 250 commits and 300 files —
+the panel prints a `+` when GitHub says it truncated, but a fortnight away from a
+busy repository is the first thing that will really test it, and it is the case
+where "since your last visit" is worth the most and knows the least. And the
+history in `Visit.shas` is written but nothing yet reads it apart from the Pull
+screen's count: the moment it earns its place is the first real force push, when
+a SHA that no ref names any more has to still be addressable.
+
+---
+
 ## Carried forward
 
 Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
 
 - **Run every read against a real token.** `Repo`, `Tree`, `Blob`, `File`,
-  `Blame`, `Log`, `Refs`, `Pulls` and `Pull` are schema-checked by hand and
-  against stubs only, and no REST endpoint — the commit, the compare, now the
-  pull request's files — has been called for real. This has been blocking since
-  Phase 2 and is now nine documents deep across eight screens. Four most need a
+  `Blame`, `Log`, `Refs`, `Pulls`, `Pull` and now `Owners` are schema-checked by
+  hand and against stubs only, and no REST endpoint — the commit, the compare,
+  the pull request's files — has been called for real. This has been blocking
+  since Phase 2 and is now ten documents deep across eight screens. Four most need a
   real repository: `Blame`, because it is the most expensive field we ask for
   and whether its line numbers line up with `Blob.text` exactly is not something
   a stub can answer; `Log`, because the whole pagination design rests on a
@@ -1486,14 +1732,15 @@ Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
   *source* spell the page as a cursor, so `pages()` never learns that REST
   exists. Any future endpoint that pages by number should do the same rather
   than teaching `PageOf` a second mode.
-- **`visits` is open for business, and Phase 8 owns the rest of it.** Phase 7
-  used exactly two records — the head you last reviewed a pull request at, and
-  the head you marked each of its files viewed at — plus one new `Store` read,
-  `visitsUnder(prefix)`, which the tree's per-row dots will want unchanged. Two
-  things are deliberately left for Phase 8 and should not be copied from here:
-  recording on view (the Review screen records by hand, and says why), and any
-  general "since your last visit" computation. `CODEOWNERS`, the ownership dots
-  and the background revalidation tick are untouched.
+- **`visits` is finished, and the two recording rules are opposites on purpose.**
+  Phase 8 closed this. There are two ways a record is written and both are right
+  for what they record: browsing debounces on view (`visits/repo.svelte.ts`),
+  because looking at a tree is seeing it; reviewing waits to be told
+  (`visits/review.svelte.ts`), because looking at a pull request is not reviewing
+  it. Anything added here should say which of the two it is before it is written.
+  `visitsUnder(prefix)` now has the second caller Phase 7 predicted, and it is
+  the Review list rather than the tree — the tree's dots turned out to need no
+  per-row read at all.
 - **`getCompare` still does not paginate**, and now that matters in one more
   place: the since-diff is a comparison, so a review of a range past REST's 250
   commits or 300 files is capped rather than paged. `truncated` says so. It is
@@ -1504,13 +1751,19 @@ Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
   This matters more with every phase: file contents were the first thing we
   cached measured in hundreds of kilobytes, a commit's patches were the second,
   and a pull request's whole diff — filed permanently, a hundred files a page —
-  is now the third and the largest.
-- **Seven pure modules have no tests of their own, and two are now overdue.**
-  The Markdown parser, the scanner, the graph, the patch parser, the shortlog
-  and now `review/anchor.ts` and `source/checks.ts` are all covered only through
-  the screens that render them — the right level while each has one caller.
-  Three no longer qualify. The patch parser has three callers as of this phase;
-  `checks.ts` has two documents; and `anchor.ts` is the one to write first,
-  because thread placement is wrong in a way you cannot see — a comment on the
-  wrong line reads as a rendering quirk rather than as a failure, which is the
-  same argument that has kept the graph on this list since Phase 5.
+  is now the third and the largest. Phase 8 adds a fourth kind that grows with
+  *time away* rather than with browsing: a since-comparison is filed permanently
+  under its two SHAs, so a fortnight of daily visits to a busy repository leaves
+  a fortnight of ranges behind it. They are small next to a diff and the LRU
+  ceiling covers them, but they are the first entries the cache accumulates
+  without anyone navigating.
+- **Nine pure modules have no tests of their own, and the list has got worse.**
+  The Markdown parser, the scanner, the graph, the patch parser, the shortlog,
+  `review/anchor.ts`, `source/checks.ts` and now `visits/owners.ts` and
+  `visits/reach.ts` are covered only through the screens that render them.
+  `visits/owners.ts` joins `anchor.ts` at the top of the list and for the same
+  reason: **a wrong answer is invisible.** A `CODEOWNERS` pattern read too
+  broadly is an indigo dot on somebody else's file, which looks exactly like a
+  correct one, and the e2e test covers four rules out of a syntax with a dozen
+  shapes. `reach.ts` is arithmetic with one edge worth pinning — a rename must
+  count once in the directories its two names share, not twice.
