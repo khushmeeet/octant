@@ -59,4 +59,17 @@ export interface Store {
 	visit(objectId: string, sha?: string | null): Promise<void>;
 
 	lastVisit(objectId: string): Promise<Visit | undefined>;
+
+	/**
+	 * Every visit whose object id starts with `prefix`, keyed by id.
+	 *
+	 * A screen that needs one visit reads one; a screen that needs a set of them
+	 * — every file of a pull request, every row of a tree — would otherwise be a
+	 * round trip per row. Object ids are hierarchical for this reason, so the
+	 * prefix is the object the set belongs to.
+	 */
+	visitsUnder(prefix: string): Promise<Map<string, Visit>>;
+
+	/** Forget one. What un-marking a file as viewed does. */
+	forget(objectId: string): Promise<void>;
 }

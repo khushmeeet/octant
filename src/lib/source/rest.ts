@@ -195,6 +195,16 @@ export const COMPARE_FILE_CAP = 300;
 export const COMMIT_FILE_CAP = 300;
 
 /**
+ * A pull request's file list is paged rather than capped at 300 — but GitHub
+ * stops at 3,000 files however many pages you ask for, so a diff that reaches
+ * the ceiling is truncated and has to say so (ARCHITECTURE.md §11).
+ */
+export const PULL_FILES_CAP = 3_000;
+
+/** GitHub's maximum page. Fewer pages is fewer round trips on a large review. */
+export const PULL_FILES_PAGE = 100;
+
+/**
  * One commit and everything it touched — PLAN.md Phase 5's diff.
  *
  * GraphQL has no patch field at all, so this is REST's, and it is the only way

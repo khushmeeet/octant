@@ -1,9 +1,11 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { fileAnchor } from '$lib/nav/paths';
 	import type { ChangedFile } from '$lib/source';
 	import VirtualRows from '$lib/ui/VirtualRows.svelte';
 	import DeltaBar from '$lib/ui/DeltaBar.svelte';
 	import { count } from '$lib/ui/format';
+	import { noteKey, type DiffNote } from './notes';
 	import { parsePatch, type DiffLine } from './parse';
 
 	/**
@@ -36,9 +38,38 @@
 		fileHref?: (file: ChangedFile) => string;
 		/** Where a file's whole patch lives on github.com. */
 		outHref?: (file: ChangedFile) => string;
+		/**
+		 * Markers on lines, keyed by `noteKey()`. Phase 7's review threads; the
+		 * diff itself stays a renderer of patches and knows nothing about them.
+		 */
+		notes?: ReadonlyMap<string, DiffNote>;
+		/** The marker currently open, so it can be shown as selected. */
+		activeNote?: string | null;
+		/** A note key to bring into view. The thread list's `enter`. */
+		revealNote?: string | null;
+		onnote?: (id: string) => void;
+		/**
+		 * Files shown as a header row only — Phase 7's mark-viewed. Collapsing is
+		 * what keeps the flat list flat: a hidden file is fewer rows, not a row of
+		 * a different height.
+		 */
+		collapsed?: ReadonlySet<string>;
+		/** Extra controls in a file's header row, right of the counts. */
+		fileExtra?: Snippet<[ChangedFile]>;
 	}
 
-	let { files, reveal = null, fileHref, outHref }: Props = $props();
+	let {
+		files,
+		reveal = null,
+		fileHref,
+		outHref,
+		notes,
+		activeNote = null,
+		revealNote = null,
+		onnote,
+		collapsed,
+		fileExtra
+	}: Props = $props();
 
 	/** DESIGN.md §2 gives code 12px at 1.6, rounded to a whole pixel. */
 	const ROW = 20;
@@ -46,7 +77,7 @@
 	type Row =
 		| { kind: 'file'; file: ChangedFile }
 		| { kind: 'hunk'; header: string; heading: string }
-		| { kind: 'line'; line: DiffLine }
+		| { kind: 'line'; line: DiffLine; path: string }
 		| { kind: 'stop'; file: ChangedFile; text: string };
 
 	const rows = $derived.by<Row[]>(() => {
@@ -54,6 +85,10 @@
 
 		for (const file of files) {
 			out.push({ kind: 'file', file });
+
+			// A viewed file keeps its header and loses its body. The header still
+			// carries the counts and the control that brings it back.
+			if (collapsed?.has(file.path)) continue;
 
 			if (file.patch === null) {
 				out.push({
@@ -69,7 +104,7 @@
 
 			for (const hunk of parsePatch(file.patch)) {
 				out.push({ kind: 'hunk', header: hunk.header, heading: hunk.heading });
-				for (const line of hunk.lines) out.push({ kind: 'line', line });
+				for (const line of hunk.lines) out.push({ kind: 'line', line, path: file.path });
 			}
 		}
 
@@ -83,10 +118,32 @@
 	 * a line in a 20,000-line file.
 	 */
 	const revealAt = $derived.by(() => {
+		if (revealNote) {
+			const at = rows.findIndex((row) => row.kind === 'line' && keyOf(row) === revealNote);
+			if (at !== -1) return at;
+		}
 		if (!reveal) return null;
 		const at = rows.findIndex((row) => row.kind === 'file' && row.file.path === reveal);
 		return at === -1 ? null : at;
 	});
+
+	/**
+	 * A line's marker key. A row can carry a number on both sides, and a thread
+	 * is anchored to exactly one of them — the new side is checked first because
+	 * that is where all but deletion comments live.
+	 */
+	function keyOf(row: Extract<Row, { kind: 'line' }>): string | null {
+		if (!notes) return null;
+		if (row.line.new !== null) {
+			const key = noteKey(row.path, 'new', row.line.new);
+			if (notes.has(key)) return key;
+		}
+		if (row.line.old !== null) {
+			const key = noteKey(row.path, 'old', row.line.old);
+			if (notes.has(key)) return key;
+		}
+		return null;
+	}
 
 	/** The widest line in the diff, so the column stops jumping as it scrolls. */
 	const widest = $derived.by(() => {
@@ -116,7 +173,11 @@
 	<VirtualRows items={rows} rowHeight={ROW} reveal={revealAt}>
 		{#snippet row(item: Row)}
 			{#if item.kind === 'file'}
-				<div class="frow" id={fileAnchor(item.file.path)}>
+				<div
+					class="frow"
+					class:shut={collapsed?.has(item.file.path)}
+					id={fileAnchor(item.file.path)}
+				>
 					<span class="fpath">{item.file.path}</span>
 					{#if item.file.previousPath}
 						<span class="was">← {item.file.previousPath}</span>
@@ -127,9 +188,12 @@
 						<b class="add">+{count(item.file.additions)}</b>
 						<b class="del">−{count(item.file.deletions)}</b>
 					</span>
-					{#if fileHref}
-						<a class="fout" href={fileHref(item.file)}>View file</a>
-					{/if}
+					<span class="fright">
+						{#if fileHref}
+							<a class="fout" href={fileHref(item.file)}>View file</a>
+						{/if}
+						{#if fileExtra}{@render fileExtra(item.file)}{/if}
+					</span>
 				</div>
 			{:else if item.kind === 'hunk'}
 				<div class="hrow">
@@ -147,7 +211,9 @@
 				</div>
 			{:else}
 				{@const line = item.line}
-				<div class="lrow {line.kind}">
+				{@const key = keyOf(item)}
+				{@const note = key ? notes?.get(key) : null}
+				<div class="lrow {line.kind}" class:noted={note} class:onnote={key === activeNote}>
 					<span class="ln old">{line.old ?? ''}</span>
 					<span class="ln new">{line.new ?? ''}</span>
 					<!-- Colour is never the sole carrier of meaning — DESIGN.md §9. -->
@@ -155,6 +221,16 @@
 						{SIGN[line.kind]}
 					</span>
 					<code class="src">{line.text}</code>
+					{#if note && key}
+						<button
+							class="note {note.tone}"
+							class:on={key === activeNote}
+							title={note.title}
+							onclick={() => onnote?.(note.id)}
+						>
+							{note.label}
+						</button>
+					{/if}
 				</div>
 			{/if}
 		{/snippet}
@@ -223,8 +299,15 @@
 		flex: none;
 	}
 
-	.fout {
+	.fright {
 		margin-left: auto;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex: none;
+	}
+
+	.fout {
 		font-size: 11px;
 		color: var(--tx3);
 		flex: none;
@@ -233,6 +316,12 @@
 
 	.fout:hover {
 		color: var(--tx);
+	}
+
+	/* A collapsed file is still a file: same row, same height, quieter path. */
+	.frow.shut .fpath {
+		color: var(--tx2);
+		font-weight: 400;
 	}
 
 	.hrow {
@@ -327,6 +416,57 @@
 
 	.note .src {
 		color: var(--tx3);
+	}
+
+	/*
+	 * A line somebody commented on. The marker sits after the source rather than
+	 * in a gutter of its own, so the sign column keeps its width and a diff with
+	 * no threads in it measures exactly as it did before Phase 7.
+	 */
+	.note {
+		position: sticky;
+		right: 0;
+		flex: none;
+		margin-left: 10px;
+		height: 14px;
+		padding: 0 6px;
+		border-radius: var(--radius-pill);
+		font-size: 10px;
+		line-height: 14px;
+		font-family: var(--font-mono);
+		border: 1px solid transparent;
+		transition:
+			color 120ms,
+			background-color 120ms,
+			border-color 120ms;
+	}
+
+	.note.accent {
+		background: var(--acc-bg);
+		color: var(--acc-tx);
+	}
+
+	/* Amber is unresolved — DESIGN.md §3 spends it on exactly that and on a
+	   force push you have not seen. */
+	.note.warn {
+		background: var(--wn);
+		color: var(--bg);
+	}
+
+	.note.muted {
+		background: var(--raise);
+		color: var(--tx3);
+	}
+
+	.note:hover,
+	.note.on {
+		border-color: var(--bd2);
+	}
+
+	/* The anchored line reads as selected while its thread is open. Not colour
+	   alone: the marker takes a border at the same moment. */
+	.lrow.onnote .src {
+		background: var(--sel);
 	}
 
 	.none {

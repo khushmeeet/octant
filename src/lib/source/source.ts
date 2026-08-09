@@ -4,6 +4,9 @@ import { getBlob, getFile, type BlobContent, type FileContent } from './blob';
 import { getCommit, type CommitDetail } from './commit';
 import { getCompare, type CompareResult } from './compare';
 import { getLog, type LogPage } from './log';
+import { getPull, type PullDetail } from './pull';
+import { getPullFiles, type PullFilesPage } from './pull-files';
+import { getPulls, type PullFilter, type PullsPage } from './pulls';
 import { getRefs, type RefKind, type RefsPage } from './refs';
 import { getRepo, type RepoSummary } from './repo';
 import { fromQuery, type CacheQuery } from './query';
@@ -17,11 +20,17 @@ import type { RepoRef } from './types';
  * `LocalSource` backed by a git sidecar would satisfy the same interface.
  * Everything above this line is pure UI and knows nothing about GitHub.
  *
- * The architecture names nine methods. Nine are implemented, and the interface
- * declares nine — a method that exists and throws is a worse lie than one that
- * is honestly absent, and the compiler is more use when the interface tells the
- * truth. Phase 6 adds `getRefs` and `getCompare`; `getPulls` and the pull
- * request's own diff arrive with the Review screen in Phase 7.
+ * The architecture names nine methods; every one is implemented, and the
+ * interface declares exactly what exists — a method that exists and throws is a
+ * worse lie than one that is honestly absent, and the compiler is more use when
+ * the interface tells the truth.
+ *
+ * Phase 7 takes it to twelve. `getPulls` is the ninth §9 names; `getPull` and
+ * `getPullFiles` are beyond it, and deliberately: §9's list was written before
+ * the Review screen was designed, and a pull request turns out to be three
+ * reads rather than one — a list, an object with its conversation, and a diff
+ * that is REST because GraphQL has no patch field. Folding the last two into
+ * `getPulls` would have made one method mean three things.
  */
 
 export interface Source {
@@ -83,6 +92,41 @@ export interface Source {
 	 * branch does not.
 	 */
 	getCompare(ref: RepoRef, base: string, head: string): CacheQuery<CompareResult>;
+
+	/**
+	 * One page of pull requests, narrowed to a state. The triage list: nothing
+	 * on it is per-row, so a page costs one query however many rows it has.
+	 */
+	getPulls(ref: RepoRef, filter?: PullFilter, after?: string | null): CacheQuery<PullsPage>;
+
+	/**
+	 * One pull request and its whole conversation — reviews, threads with their
+	 * line positions, and the check rollup. Everything but the diff.
+	 */
+	getPull(ref: RepoRef, number: number): CacheQuery<PullDetail>;
+
+	/**
+	 * One page of that pull request's diff, over REST. `at` is the pair of
+	 * commits the diff is a function of, and it is what makes the answer
+	 * permanent — see `pull-files.ts`.
+	 */
+	getPullFiles(
+		ref: RepoRef,
+		number: number,
+		at: PullDiffAt,
+		after?: string | null
+	): CacheQuery<PullFilesPage>;
+}
+
+/**
+ * The two commits a pull request's diff is measured between. Both are needed:
+ * the head is the obvious one, and the base matters because GitHub recomputes
+ * the merge base when the target branch moves, so a diff at one head against
+ * two different bases is two different answers.
+ */
+export interface PullDiffAt {
+	headOid: string;
+	baseOid: string;
 }
 
 export const GitHubSource: Source = {
@@ -185,6 +229,54 @@ export const GitHubSource: Source = {
 				: mutableKey('compare', ref, `${base}...${head}`),
 			maxAge: FRESHNESS.compare,
 			run: (options) => getCompare(ref, base, head, options)
+		};
+	},
+
+	getPulls(ref, filter = 'open', after = null) {
+		// A pull request list is the mutable layer by definition — the whole point
+		// of it is what is in flight. The cursor is part of the address for the
+		// same reason it is on a log page: a page is filed under where it starts.
+		const page = after ? `after=${after}` : 'head';
+
+		return {
+			key: mutableKey('pulls', ref, `${filter}:${page}`),
+			maxAge: FRESHNESS.pulls,
+			run: (options) => getPulls(ref, filter, after, options).then(fromQuery)
+		};
+	},
+
+	getPull(ref, number) {
+		return {
+			// Mutable however settled the pull request looks: a merged one still
+			// gains replies, and the check rollup moves while CI runs. The window is
+			// the shortest in the app for exactly that reason.
+			key: mutableKey('pull', ref, String(number)),
+			maxAge: FRESHNESS.pull,
+			run: (options) => getPull(ref, number, options).then(fromQuery)
+		};
+	},
+
+	getPullFiles(ref, number, at, after = null) {
+		// The cursor is the page it came from — `pull-files.ts` explains why the
+		// synthetic cursor lives here rather than inside `pages()`.
+		const page = after ? Number(after) + 1 : 1;
+
+		return {
+			/**
+			 * **Permanent, keyed by both commits.** A pull request's diff is a
+			 * function of its head and the base it is measured against, so pinning
+			 * both makes the answer immutable — which matters more here than
+			 * anywhere else in the app, because this is the largest payload we
+			 * fetch and the screen that fetches it is the one people sit on
+			 * longest. `revKey` cannot decide this: it routes on one revision and a
+			 * diff has two, the same reason `getCompare` writes its check out.
+			 */
+			key:
+				isOid(at.headOid) && isOid(at.baseOid)
+					? immutableKey('pullfiles', ref, at.headOid, `${number}:${at.baseOid}:p${page}`)
+					: mutableKey('pullfiles', ref, `${number}:p${page}`),
+			maxAge: FRESHNESS.pull,
+			run: (options) => getPullFiles(ref, number, page, options)
 		};
 	}
 };

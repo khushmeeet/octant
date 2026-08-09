@@ -1,4 +1,12 @@
-import { idbCount, idbDelete, idbDeleteMany, idbGet, idbOldestKeys, idbPut } from './idb';
+import {
+	idbCount,
+	idbDelete,
+	idbDeleteMany,
+	idbGet,
+	idbOldestKeys,
+	idbPrefix,
+	idbPut
+} from './idb';
 import type { CacheKey, CacheStore } from './keys';
 import {
 	EVICT_FRACTION,
@@ -119,6 +127,14 @@ export class IdbStore implements Store {
 
 	lastVisit(objectId: string): Promise<Visit | undefined> {
 		return idbGet<Visit>(STORE.visits, objectId);
+	}
+
+	visitsUnder(prefix: string): Promise<Map<string, Visit>> {
+		return idbPrefix<Visit>(STORE.visits, prefix);
+	}
+
+	forget(objectId: string): Promise<void> {
+		return idbDelete(STORE.visits, objectId);
 	}
 
 	/* ----------------------------------------------------------- private -- */

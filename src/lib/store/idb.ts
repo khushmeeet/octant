@@ -119,6 +119,42 @@ export function idbOldestKeys(store: StoreName, index: string, limit: number): P
 	);
 }
 
+/**
+ * Every record whose key starts with `prefix`, as a map.
+ *
+ * A value cursor rather than a key cursor, because the caller wants what is in
+ * them — this is the read that answers "which files of this pull request have I
+ * marked viewed", and asking that one key at a time would be one IndexedDB
+ * round trip per file in the diff.
+ *
+ * The bound is the prefix and the prefix with the highest code point appended,
+ * which is how IndexedDB spells "starts with" — there is no prefix operator, and
+ * `￿` sorts after every character a key of ours can contain.
+ */
+export function idbPrefix<T>(store: StoreName, prefix: string): Promise<Map<string, T>> {
+	return openDb().then(
+		(db) =>
+			new Promise<Map<string, T>>((resolve, reject) => {
+				const tx = db.transaction(store, 'readonly');
+				const range = IDBKeyRange.bound(prefix, `${prefix}￿`);
+				const request = tx.objectStore(store).openCursor(range);
+				const found = new Map<string, T>();
+
+				request.onsuccess = () => {
+					const cursor = request.result;
+					if (!cursor) {
+						resolve(found);
+						return;
+					}
+					found.set(cursor.key as string, cursor.value as T);
+					cursor.continue();
+				};
+				request.onerror = () => reject(request.error ?? new Error('IndexedDB cursor failed'));
+				tx.onabort = () => reject(tx.error ?? new Error('IndexedDB transaction aborted'));
+			})
+	);
+}
+
 /** One transaction for the whole batch, so a sweep is atomic and cheap. */
 export function idbDeleteMany(store: StoreName, keys: string[]): Promise<void> {
 	if (keys.length === 0) return Promise.resolve();

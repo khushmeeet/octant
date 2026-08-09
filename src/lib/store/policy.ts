@@ -50,8 +50,16 @@ export const FRESHNESS = {
 	 * SHAs it is immutable and this is never consulted.
 	 */
 	compare: 30_000,
-	/** Pull request state. */
-	pull: 30_000,
+	/**
+	 * One pull request: its state, its threads, and the check rollup, which all
+	 * arrive in one document. The window is the shortest of the three because a
+	 * screen is only as fresh as its fastest-moving field, and on this one that
+	 * is CI. The diff underneath it is addressed by two commit SHAs and is
+	 * immutable, so the short window costs a small query rather than a large one.
+	 */
+	pull: 15_000,
+	/** The triage list. As volatile as the pushes that reorder it. */
+	pulls: 30_000,
 	/** Check runs, while CI is moving. */
 	checks: 15_000
 } as const;

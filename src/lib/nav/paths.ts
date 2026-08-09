@@ -1,4 +1,5 @@
 import type { RefKind } from '$lib/source/refs';
+import type { PullFilter } from '$lib/source/pulls';
 import { resolve } from '$app/paths';
 import type { RepoRef } from '$lib/source/types';
 import { lineHash, type LineRange } from './lines';
@@ -17,6 +18,8 @@ import { lineHash, type LineRange } from './lines';
  *   /{owner}/{name}/commit/{oid}        one commit, and its diff
  *   /{owner}/{name}/refs                branches and tags, on one screen
  *   /{owner}/{name}/compare/{base}/{head}   what is between two revisions
+ *   /{owner}/{name}/pulls               pull requests, narrowed by state
+ *   /{owner}/{name}/pull/{number}       one pull request, diff first
  *
  * **The blame gutter is part of the address, not a toggle beside it.** View and
  * Blame are two ways of reading the same object, and both are things you send
@@ -286,6 +289,93 @@ export function parseCompare(params: Record<string, string | undefined>): Compar
 	};
 }
 
+/* --------------------------------------------------------------- review -- */
+
+/**
+ * Pull requests — PLAN.md Phase 7. The list is `pulls` and one of them is
+ * `pull/{number}`, naming the object rather than the screen, the same way
+ * `commit/{rev}` does. The sidebar item is called Review because that is the
+ * question it answers; the URL is called `pull` because that is what is at it.
+ */
+export interface PullsAddress {
+	repo: RepoRef;
+	/** Which states are shown. A view of one address, so a query parameter. */
+	filter: PullFilter;
+}
+
+/**
+ * Which diff the Review screen is showing. `since` is the default wherever
+ * there is a recorded review to measure from — PLAN.md Phase 7 is explicit that
+ * it is the default *view*, not an option — and `all` is the whole pull
+ * request, which is what a first pass wants and what a second pass falls back
+ * to when nothing has been recorded yet.
+ */
+export type PullView = 'since' | 'all';
+
+export interface PullAddress {
+	repo: RepoRef;
+	number: number;
+	/** `null` means "whichever is right", which the screen decides from the record. */
+	view: PullView | null;
+}
+
+const FILTERS: Record<string, PullFilter> = {
+	open: 'open',
+	merged: 'merged',
+	closed: 'closed',
+	all: 'all'
+};
+
+export function pullsHref(repo: RepoRef, options: { filter?: PullFilter } = {}): string {
+	const base = resolve('/[owner]/[name]/pulls', {
+		owner: segment(repo.owner),
+		name: segment(repo.name)
+	});
+
+	// `open` is the default and is left out, so the plain URL is the one you
+	// arrive at from the sidebar and the one you would type.
+	return options.filter && options.filter !== 'open' ? `${base}?state=${options.filter}` : base;
+}
+
+export function parsePulls(
+	params: Record<string, string | undefined>,
+	search?: URLSearchParams
+): PullsAddress {
+	return {
+		repo: { owner: params.owner ?? '', name: params.name ?? '' },
+		filter: FILTERS[search?.get('state') ?? ''] ?? 'open'
+	};
+}
+
+export function pullHref(
+	repo: RepoRef,
+	number: number,
+	options: { view?: PullView | null; file?: string | null } = {}
+): string {
+	const base = resolve('/[owner]/[name]/pull/[number]', {
+		owner: segment(repo.owner),
+		name: segment(repo.name),
+		number: String(number)
+	});
+
+	const query = options.view ? `?view=${options.view}` : '';
+	return options.file ? `${base}${query}#${fileAnchor(options.file)}` : `${base}${query}`;
+}
+
+export function parsePull(
+	params: Record<string, string | undefined>,
+	search?: URLSearchParams
+): PullAddress {
+	const view = search?.get('view');
+	return {
+		repo: { owner: params.owner ?? '', name: params.name ?? '' },
+		// A number the route could not parse is 0, which no pull request is, so
+		// the screen reports it as not found rather than asking GitHub about it.
+		number: Number.parseInt(params.number ?? '', 10) || 0,
+		view: view === 'since' || view === 'all' ? view : null
+	};
+}
+
 /** The id a file's patch carries on the commit screen, and the hash that finds it. */
 export function fileAnchor(path: string): string {
 	return `f-${segment(path)}`;
@@ -401,6 +491,17 @@ export function archiveUrl(repo: RepoRef, rev: string): string {
  */
 export function githubCompareUrl(repo: RepoRef, base: string, head: string): string {
 	return `${slug(repo)}/compare/${segment(base)}...${segment(head)}`;
+}
+
+/**
+ * A pull request's conversation. We render its diff, its threads and its checks
+ * — but writing a comment is a write, and ARCHITECTURE.md §1 puts every write
+ * out of scope for v1 (§12 asks whether review comments should be the
+ * exception; until that is answered, replying is a link out rather than a form
+ * that does not work).
+ */
+export function githubPullUrl(repo: RepoRef, number: number, tab = ''): string {
+	return `${slug(repo)}/pull/${number}${tab}`;
 }
 
 /* ------------------------------------------------------------- private -- */
