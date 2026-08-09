@@ -22,7 +22,6 @@
 	import Shell from '$lib/ui/Shell.svelte';
 	import Sidebar from '$lib/ui/Sidebar.svelte';
 	import VirtualRows from '$lib/ui/VirtualRows.svelte';
-	import { copy } from '$lib/ui/clipboard';
 	import { ago, bytes, count, kilobytes, mode } from '$lib/ui/format';
 	import type { Crumb, PanelEntry, Verb } from '$lib/ui/types';
 	import { sinceLastVisit } from '$lib/visits/since.svelte';
@@ -211,54 +210,31 @@
 
 	/* -------------------------------------------------------------- verbs -- */
 
-	/**
-	 * A permalink needs the commit SHA of whatever revision is on screen, and
-	 * Phase 3 only had one for the default branch — so the verb was absent
-	 * everywhere else. Phase 6 puts the answer in the tree query itself
-	 * (`source/revision.ts`), which resolves an expression it was already
-	 * sending, so the verb works on any branch or tag and still costs nothing.
-	 * It is absent only when the address is already permanent.
-	 */
 	const head = $derived(summary.data?.head ?? null);
-	const commitOid = $derived(tree.data?.commitOid ?? null);
-	const permalink = $derived(commitOid ? treeHref(repo, commitOid, path) : null);
-	const alreadyPermanent = $derived(address.rev !== null && address.rev === commitOid);
-
-	let copied = $state(false);
-
-	async function copyPath() {
-		copied = await copy(path || `${repo.owner}/${repo.name}`);
-		setTimeout(() => (copied = false), 1200);
-	}
 
 	/**
 	 * `Files` and `Readme` used to lead this list, scrolling the page to one of
 	 * its two sections. They went with the verb row: both sections are on the
 	 * screen you are already on, a scroll away, and a jump link to something
 	 * visible is chrome pretending to be navigation.
+	 *
+	 * `Permalink` and `Copy path` went the same way, and for the same reason.
+	 * The tree is the screen you land on, and neither verb is about the tree:
+	 * one re-addresses a listing you are already reading and the other hands
+	 * back a path the breadcrumb is spelling out two inches to the left. Both
+	 * still exist where they answer a question — on a file, whose SHA is the
+	 * thing you quote, and on a commit. Here they were a row of chrome charged
+	 * to every visit.
 	 */
-	const verbs = $derived.by<Verb[]>(() => {
-		const list: Verb[] = [
-			{
-				id: 'archive',
-				label: 'Archive',
-				href: archiveUrl(repo, rev === 'HEAD' ? (summary.data?.defaultBranch ?? 'HEAD') : rev),
-				external: true,
-				title: 'Download this revision as a zip from github.com'
-			}
-		];
-
-		if (permalink && !alreadyPermanent) {
-			list.push({
-				id: 'permalink',
-				label: 'Permalink',
-				href: permalink,
-				title: 'Address this tree by commit SHA — cached permanently once you do'
-			});
+	const verbs = $derived.by<Verb[]>(() => [
+		{
+			id: 'archive',
+			label: 'Archive',
+			href: archiveUrl(repo, rev === 'HEAD' ? (summary.data?.defaultBranch ?? 'HEAD') : rev),
+			external: true,
+			title: 'Download this revision as a zip from github.com'
 		}
-
-		return list;
-	});
+	]);
 
 	/* -------------------------------------------------------------- chrome -- */
 
@@ -349,12 +325,7 @@
 {/snippet}
 
 {#snippet header()}
-	<Header
-		{crumbs}
-		{pills}
-		{verbs}
-		utility={{ id: 'copy', label: copied ? 'Copied' : 'Copy path', onselect: copyPath }}
-	/>
+	<Header {crumbs} {pills} {verbs} />
 {/snippet}
 
 {#snippet panel()}

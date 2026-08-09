@@ -1720,6 +1720,72 @@ octal is still the truth underneath and is on the cell's title.
 
 ---
 
+## Refinements — the graph's missing character, and four things that were not there
+
+**Done when:** a merge that closes a lane and opens one in the same row says so,
+and the four places the app was showing a heading, a verb or a tree that had
+nothing behind it are showing nothing instead. ✅
+
+### What changed
+
+| File | Change |
+|---|---|
+| `log/graph.ts` | `├`/`┤` for a lane that closes and reopens; a parent is drawable only if it is *below* |
+| `log/Authors.svelte` | new — what is left of `log/Scope.svelte` once the file tree goes |
+| `log/Scope.svelte` | deleted |
+| `log/CommitDetail.svelte` | 210px → 340px, and 44% → 52% |
+| `refs/RefsScreen.svelte` | a kind with nothing in it is not a group |
+| `refs/Kinds.svelte` | and is not a sidebar item either |
+| `tree/TreeScreen.svelte` | loses `Permalink` and `Copy path` |
+
+**The graph was drawing a close where an open belonged.** A merge takes a branch
+in, and the lane it frees is the lane the *next* branch out claims — on the same
+row, because the column is one row per commit. `commitGraph` set both flags and
+`draw` tested the closing one first, so a merge commit that arrived right after
+a rejoin drew `●╯` and then ran four rows of `│` down from a lane it had just
+said was over. In a linear history with pull requests this is not a corner case:
+it is every second merge, which is what the octant repository's own log looks
+like. `├`/`┤` is the character that says both — in from above, out below, and a
+stroke towards the commit that joined them — and it keeps the column as narrow
+as opening a fresh lane would not.
+
+**A parent above its own child was keeping a lane open forever.** `known` was a
+set of every oid in the window, so any parent in the list could hold a lane. A
+log is ordered by date and not by topology, so clock skew puts a parent above
+its child often enough to matter, and the lane it opened waited for a commit
+that had already gone past — an unbroken vertical to the bottom of the list.
+Position, not membership: a parent is drawable only if it is below.
+
+**A heading over nothing reads as a section that failed to load.** A repository
+that has never been tagged got `Tags` and a `0` in both the list and the
+sidebar, which is the shape of a section still loading. `null` is *not counted
+yet* and is left alone; a definite zero is absent. The panel still reports
+`Tags 0`, because a fact sheet answering a question is not the same as a
+navigation target that goes nowhere.
+
+**The Tree screen's two remaining verbs were not about the tree.** `Copy path`
+handed back a path the breadcrumb was spelling out two inches to the left, and
+`Permalink` re-addressed a listing you were already reading. Both still exist
+where they answer a question — on a file, whose SHA is the thing you quote, and
+on a commit. The address `Permalink` made is still an address and is still the
+permanent one; what went is the chrome charged to every visit to the screen
+people open first.
+
+**The commit pane was a letterbox.** 210px put a message of any substance and a
+commit of any size behind a scrollbar, which turns a pane you glance at into one
+you operate. 340px is a dozen files and a paragraph without touching the wheel,
+and the table above it still shows more rows than the pane shows files.
+
+**The log's sidebar was a second file tree.** It listed the scope's directory so
+the log could be moved sideways from there — on a screen whose subject is
+history, below which the one control that belongs there was pushed out of sight.
+Re-scoping did not go anywhere: the breadcrumb walks the path and keeps the
+author it was narrowed to, and the Tree and File screens' `Log` verbs arrive
+already scoped. What is left is the author filter, and the section is named for
+it.
+
+---
+
 ## Carried forward
 
 Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.

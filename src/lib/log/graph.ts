@@ -45,20 +45,31 @@ const CLOSE_RIGHT = '╯';
 const CLOSE_LEFT = '╰';
 const OPEN_RIGHT = '╮';
 const OPEN_LEFT = '╭';
+/** A lane that closes into this commit and reopens in the same column. */
+const JOIN_RIGHT = '┤';
+const JOIN_LEFT = '├';
 const MORE = '⋯';
 
 export function commitGraph(
 	commits: readonly GraphCommit[],
 	maxLanes: number = MAX_LANES
 ): GraphRow[] {
-	// Only a parent we are actually going to draw can keep a lane open.
-	const known = new Set(commits.map((commit) => commit.oid));
+	// Only a parent we are actually going to draw can keep a lane open — and
+	// *draw below this row*, which is not the same thing. A log is ordered by
+	// date, not by topology, so a parent can land above its own child when the
+	// clocks disagree. A lane opened for one would wait for a commit that has
+	// already gone past, and trail an unbroken vertical off the bottom of the
+	// list. Position, not membership, is what makes a parent drawable.
+	const at = new Map<string, number>();
+	commits.forEach((commit, i) => {
+		if (!at.has(commit.oid)) at.set(commit.oid, i);
+	});
 
 	/** `lanes[i]` is the oid lane `i` is waiting for, or `null` if it is free. */
 	const lanes: (string | null)[] = [];
 	const rows: GraphRow[] = [];
 
-	for (const commit of commits) {
+	commits.forEach((commit, i) => {
 		let lane = lanes.indexOf(commit.oid);
 		if (lane === -1) {
 			lane = freeLane(lanes);
@@ -74,7 +85,7 @@ export function commitGraph(
 			}
 		}
 
-		const parents = commit.parents.filter((parent) => known.has(parent));
+		const parents = commit.parents.filter((parent) => (at.get(parent) ?? -1) > i);
 		lanes[lane] = parents[0] ?? null;
 
 		const opened: number[] = [];
@@ -91,7 +102,7 @@ export function commitGraph(
 		// Trailing free lanes are not lanes. Dropping them keeps the column as
 		// narrow as the history actually is.
 		while (lanes.length > 0 && lanes[lanes.length - 1] === null) lanes.pop();
-	}
+	});
 
 	return rows;
 }
@@ -112,8 +123,18 @@ function draw(
 
 	for (let j = 0; j < width; j += 1) {
 		if (j === at) continue;
-		if (merging.includes(j)) cells[j] = j > at ? CLOSE_RIGHT : CLOSE_LEFT;
-		else if (opened.includes(j)) cells[j] = j > at ? OPEN_RIGHT : OPEN_LEFT;
+		// A merge closes a lane and a merge commit's extra parent opens one, and
+		// both happen on the row of the same merge commit — so a column that took
+		// a branch in can hand the freed slot straight back to the next one out.
+		// Drawn as a close alone it lies about what continues below it; as an
+		// open alone it leaves the branch above it dangling. It is both, and
+		// `├`/`┤` is the one character that says so: in from above, out below,
+		// and a stroke towards the commit that joined them.
+		const closes = merging.includes(j);
+		const opens = opened.includes(j);
+		if (closes && opens) cells[j] = j > at ? JOIN_RIGHT : JOIN_LEFT;
+		else if (closes) cells[j] = j > at ? CLOSE_RIGHT : CLOSE_LEFT;
+		else if (opens) cells[j] = j > at ? OPEN_RIGHT : OPEN_LEFT;
 		else if (lanes[j] != null) cells[j] = LINE;
 	}
 
