@@ -1722,32 +1722,52 @@ octal is still the truth underneath and is on the cell's title.
 
 ## Refinements — the graph's missing character, and four things that were not there
 
-**Done when:** a merge that closes a lane and opens one in the same row says so,
-and the four places the app was showing a heading, a verb or a tree that had
-nothing behind it are showing nothing instead. ✅
+**Done when:** the graph column is a graph, and the four places the app was
+showing a heading, a verb or a tree that had nothing behind it are showing
+nothing instead. ✅
 
 ### What changed
 
 | File | Change |
 |---|---|
-| `log/graph.ts` | `├`/`┤` for a lane that closes and reopens; a parent is drawable only if it is *below* |
+| `log/graph.ts` | emits lanes and edges rather than characters; a parent is drawable only if it is *below* |
+| `log/CommitGraph.svelte` | new — one row of the column, drawn as SVG |
 | `log/Authors.svelte` | new — what is left of `log/Scope.svelte` once the file tree goes |
 | `log/Scope.svelte` | deleted |
 | `log/CommitDetail.svelte` | 210px → 340px, and 44% → 52% |
+| `app.css` | `--lane-0`…`--lane-4` in both themes; the column goes 46px → 58px |
 | `refs/RefsScreen.svelte` | a kind with nothing in it is not a group |
 | `refs/Kinds.svelte` | and is not a sidebar item either |
 | `tree/TreeScreen.svelte` | loses `Permalink` and `Copy path` |
 
-**The graph was drawing a close where an open belonged.** A merge takes a branch
-in, and the lane it frees is the lane the *next* branch out claims — on the same
-row, because the column is one row per commit. `commitGraph` set both flags and
-`draw` tested the closing one first, so a merge commit that arrived right after
-a rejoin drew `●╯` and then ran four rows of `│` down from a lane it had just
-said was over. In a linear history with pull requests this is not a corner case:
-it is every second merge, which is what the octant repository's own log looks
-like. `├`/`┤` is the character that says both — in from above, out below, and a
-stroke towards the commit that joined them — and it keeps the column as narrow
-as opening a fresh lane would not.
+**Box-drawing characters cannot draw a graph.** This is the thing five phases
+of picking better glyphs never got round to admitting. `│` is a stroke inside a
+12px line box dropped into a 32px row, so a lane running through ten commits was
+ten dashes with ten gaps; `╮` was a curve that stopped at the edge of its own
+cell rather than reaching the lane it was supposed to be joining. The column
+looked like punctuation next to the message, not like history. Nothing in the
+character set fixes ink that cannot cross a row boundary.
+
+So the pass emits geometry — lanes, and the edges that join, fork or run past —
+and `CommitGraph.svelte` draws one SVG per row at the row's real height. Lanes
+meet because a lane leaving the bottom of one row is the same line entering the
+top of the next. Curves rather than corners, with the control points at the
+quarter heights, so a branch leaves and rejoins vertically: at 32px a diagonal
+is a jagged line and an elbow is a corner you have to look at twice. Colour is
+by column, which is what every graph that colours lanes does — stable while the
+lane is, one colour down the spine, and deliberately not the delta bar's green
+and red, which already mean added and removed on the same row.
+
+**Drawn, the column also stopped losing edges.** Two of them. A merge takes a
+branch in and the lane it frees is the lane the *next* branch out claims, on the
+same row, because this is one row per commit — the old `draw` set both flags and
+tested the closing one first, so a merge arriving right after a rejoin drew `╯`
+and then ran four rows of `│` down from a lane it had just said was over. In a
+history that lands pull requests that is every second merge, this repository's
+own log included. And a commit whose parent was the next row *in a filtered log*
+had no glyph for its own lane at all, so a scoped history drew four unconnected
+dots where two of them were parent and child. `up`/`down` are edges now, like
+any other.
 
 **A parent above its own child was keeping a lane open forever.** `known` was a
 set of every oid in the window, so any parent in the list could hold a lane. A

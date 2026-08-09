@@ -1,6 +1,5 @@
 /**
- * The graph column — DESIGN.md §5, "box-drawing characters in mono at a fixed
- * 46px width".
+ * The graph column — DESIGN.md §5.
  *
  * History arrives as a flat list of commits, each carrying its parents, and
  * this turns that back into the shape it came from: lanes. A lane holds the oid
@@ -18,16 +17,48 @@
  * bottom of a page: the parents are simply not loaded yet, so the lanes end,
  * and loading more redraws them because the whole column is one cheap pass.
  *
- * It is deliberately a *one-row-per-commit* drawing rather than a railway with
- * half-rows between commits. 46px is about six characters, and a graph that
- * needed more width than that would be a graph nobody could read at a glance.
+ * **What comes out is geometry, not characters.** This column was box-drawing
+ * glyphs in mono for five phases, and glyphs cannot draw a graph. `│` is a
+ * stroke inside a 12px line box dropped into a 32px row, so a lane running
+ * through ten commits is ten dashes with gaps between them, and `╮` is a curve
+ * that stops at the edge of its own cell rather than reaching the lane it is
+ * supposed to be joining. No amount of choosing better characters fixes a
+ * column whose ink cannot cross a row boundary. So the pass emits lanes and
+ * edges, `CommitGraph.svelte` draws them as SVG at the row's real height, and
+ * the lines meet because they are the same line.
+ *
+ * It is still deliberately a *one-row-per-commit* drawing rather than a railway
+ * with half-rows between commits: a merge takes a branch in and lets the next
+ * one out on the same row, which is what `joins` and `forks` both being
+ * non-empty means.
  */
 
+/** One lane's worth of an edge: where it sits, and what colour it carries. */
+export interface GraphEdge {
+	/** Column index, already clamped to what fits. */
+	at: number;
+	/** Which of the lane colours this edge is drawn in. */
+	tone: number;
+}
+
 export interface GraphRow {
-	/** One character per lane, left to right. Rendered as a single mono string. */
-	cells: string[];
-	/** Which lane this commit sits in, clamped to what fits. */
+	/** Column the commit's dot sits in. */
 	lane: number;
+	/** The dot's colour. */
+	tone: number;
+	/** Columns in use on this row — what the renderer sizes itself against. */
+	width: number;
+	/** Lanes running straight past this commit, top to bottom. */
+	through: GraphEdge[];
+	/** Lanes arriving from the row above and ending at the dot. */
+	joins: GraphEdge[];
+	/** Lanes leaving the dot and carrying on below. */
+	forks: GraphEdge[];
+	/** The commit's own lane, above the dot and below it. */
+	up: boolean;
+	down: boolean;
+	/** A lane is open past the right-hand edge, and the row has to say so. */
+	beyond: boolean;
 }
 
 export interface GraphCommit {
@@ -35,20 +66,16 @@ export interface GraphCommit {
 	parents: readonly string[];
 }
 
-/** What fits in the column at 12px mono. Past this the row says so and stops. */
+/** What fits in the column. Past this the row says so and stops. */
 export const MAX_LANES = 5;
 
-const DOT = '●';
-const LINE = '│';
-const DASH = '─';
-const CLOSE_RIGHT = '╯';
-const CLOSE_LEFT = '╰';
-const OPEN_RIGHT = '╮';
-const OPEN_LEFT = '╭';
-/** A lane that closes into this commit and reopens in the same column. */
-const JOIN_RIGHT = '┤';
-const JOIN_LEFT = '├';
-const MORE = '⋯';
+/** Geometry the column and its renderer have to agree on, in CSS pixels. */
+export const LANE_GAP = 11;
+export const LANE_X0 = 7;
+export const GRAPH_W = LANE_X0 * 2 + (MAX_LANES - 1) * LANE_GAP;
+
+/** How many colours the lanes cycle through — `--lane-0` upwards in `app.css`. */
+export const TONES = 5;
 
 export function commitGraph(
 	commits: readonly GraphCommit[],
@@ -71,6 +98,9 @@ export function commitGraph(
 
 	commits.forEach((commit, i) => {
 		let lane = lanes.indexOf(commit.oid);
+		// A lane was already waiting for this commit, so there is a line above it.
+		// Otherwise it is a tip — the dot starts here and nothing runs into it.
+		const up = lane !== -1;
 		if (lane === -1) {
 			lane = freeLane(lanes);
 			lanes[lane] = commit.oid;
@@ -97,7 +127,7 @@ export function commitGraph(
 			opened.push(j);
 		}
 
-		rows.push(draw(lane, lanes, merging, opened, maxLanes));
+		rows.push(shape(lane, up, lanes, merging, opened, maxLanes));
 
 		// Trailing free lanes are not lanes. Dropping them keeps the column as
 		// narrow as the history actually is.
@@ -107,8 +137,9 @@ export function commitGraph(
 	return rows;
 }
 
-function draw(
+function shape(
 	lane: number,
+	up: boolean,
 	lanes: readonly (string | null)[],
 	merging: readonly number[],
 	opened: readonly number[],
@@ -119,42 +150,41 @@ function draw(
 	const open = Math.max(lanes.length, lane + 1, ...merging.map((j) => j + 1));
 	const width = Math.min(open, maxLanes);
 	const at = Math.min(lane, width - 1);
-	const cells: string[] = new Array(width).fill(' ');
+
+	const through: GraphEdge[] = [];
+	const joins: GraphEdge[] = [];
+	const forks: GraphEdge[] = [];
 
 	for (let j = 0; j < width; j += 1) {
 		if (j === at) continue;
 		// A merge closes a lane and a merge commit's extra parent opens one, and
 		// both happen on the row of the same merge commit — so a column that took
 		// a branch in can hand the freed slot straight back to the next one out.
-		// Drawn as a close alone it lies about what continues below it; as an
-		// open alone it leaves the branch above it dangling. It is both, and
-		// `├`/`┤` is the one character that says so: in from above, out below,
-		// and a stroke towards the commit that joined them.
-		const closes = merging.includes(j);
-		const opens = opened.includes(j);
-		if (closes && opens) cells[j] = j > at ? JOIN_RIGHT : JOIN_LEFT;
-		else if (closes) cells[j] = j > at ? CLOSE_RIGHT : CLOSE_LEFT;
-		else if (opens) cells[j] = j > at ? OPEN_RIGHT : OPEN_LEFT;
-		else if (lanes[j] != null) cells[j] = LINE;
+		// It is two edges in one column, not one edge that has to choose which
+		// half of itself to be.
+		if (merging.includes(j)) joins.push(edge(j));
+		if (opened.includes(j)) forks.push(edge(j));
+		if (!merging.includes(j) && !opened.includes(j) && lanes[j] != null) through.push(edge(j));
 	}
 
-	// Reach from the commit out to whatever it connected to, over the gaps only:
-	// a lane passing through keeps its own vertical rather than being crossed.
-	for (const j of [...merging, ...opened]) {
-		if (j >= width) continue;
-		const from = j > at ? at + 1 : j + 1;
-		const to = j > at ? j : at;
-		for (let k = from; k < to; k += 1) if (cells[k] === ' ') cells[k] = DASH;
-	}
+	return {
+		lane: at,
+		tone: at % TONES,
+		width,
+		through,
+		joins,
+		forks,
+		up,
+		down: lanes[lane] != null,
+		// Something is still open past the edge of the column. Saying so is better
+		// than drawing a graph that quietly leaves branches out.
+		beyond: lanes.slice(maxLanes).some((held) => held != null)
+	};
+}
 
-	cells[at] = DOT;
-
-	// Something is still open past the edge of the column. Saying so is better
-	// than drawing a graph that quietly leaves branches out.
-	const beyond = lanes.slice(maxLanes).some((held) => held != null);
-	if (beyond && width - 1 !== at) cells[width - 1] = MORE;
-
-	return { cells, lane: at };
+/** Lanes carry their colour by position, so a spine keeps its own from top to bottom. */
+function edge(at: number): GraphEdge {
+	return { at, tone: at % TONES };
 }
 
 function freeLane(lanes: readonly (string | null)[]): number {

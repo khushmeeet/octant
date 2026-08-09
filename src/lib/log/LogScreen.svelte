@@ -25,6 +25,7 @@
 	import { sinceLastVisit } from '$lib/visits/since.svelte';
 	import Authors from './Authors.svelte';
 	import CommitDetail from './CommitDetail.svelte';
+	import CommitGraph from './CommitGraph.svelte';
 	import { tallyAuthors } from './authors';
 	import { commitGraph } from './graph';
 
@@ -507,9 +508,7 @@
 								onclick={(event) => pick(event, index)}
 								ondblclick={() => open(commit)}
 							>
-								<span class="graph mono" aria-hidden="true">
-									{graph[index]?.cells.join('') ?? ''}
-								</span>
+								<CommitGraph row={graph[index] ?? null} />
 								<span class="msg">{commit.headline}</span>
 								<span class="sha mono">{commit.abbreviatedOid}</span>
 								<span class="delta">
@@ -664,13 +663,10 @@
 		background: var(--sel);
 	}
 
-	.c-graph,
-	.graph {
+	/* `CommitGraph` owns its own width, so this is only the heading above it. */
+	.c-graph {
 		width: var(--col-graph);
 		flex: none;
-		color: var(--tx3);
-		white-space: pre;
-		overflow: hidden;
 	}
 
 	.c-msg,
