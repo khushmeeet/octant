@@ -56,6 +56,10 @@ export const ICONS = {
 			'M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1',
 			'M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1'
 		]
+	},
+	/** The shell's frame with its right column ruled off — the context panel. */
+	panel: {
+		d: ['M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z', 'M15 5.5v13']
 	}
 } as const satisfies Record<string, IconShape>;
 

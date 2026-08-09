@@ -8,7 +8,6 @@
 	import Icon from '$lib/ui/Icon.svelte';
 	import RightPanel from '$lib/ui/RightPanel.svelte';
 	import Shell from '$lib/ui/Shell.svelte';
-	import VerbRow from '$lib/ui/VerbRow.svelte';
 	import { ago, count } from '$lib/ui/format';
 	import type { PanelEntry } from '$lib/ui/types';
 
@@ -61,15 +60,11 @@
 	<Header crumbs={[{ label: 'octant' }]} />
 {/snippet}
 
-{#snippet verbs()}
-	<VerbRow object="octant" />
-{/snippet}
-
 {#snippet panel()}
 	<RightPanel {about} />
 {/snippet}
 
-<Shell {header} {verbs} {panel}>
+<Shell {header} {panel}>
 	<div class="entry">
 		<h1>Open a repository</h1>
 		<p class="lede">

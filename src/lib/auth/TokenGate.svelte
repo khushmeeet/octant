@@ -86,7 +86,7 @@
 		width: min(420px, 100%);
 		background: var(--panel);
 		border: 1px solid var(--bd);
-		border-radius: var(--frame-radius);
+		border-radius: var(--radius-card);
 		padding: 24px;
 	}
 

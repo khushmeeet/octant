@@ -33,7 +33,6 @@
 	import RightPanel from '$lib/ui/RightPanel.svelte';
 	import Shell from '$lib/ui/Shell.svelte';
 	import Sidebar from '$lib/ui/Sidebar.svelte';
-	import VerbRow from '$lib/ui/VerbRow.svelte';
 	import { copy } from '$lib/ui/clipboard';
 	import { ago, count } from '$lib/ui/format';
 	import type { Crumb, PanelEntry, Verb } from '$lib/ui/types';
@@ -533,12 +532,9 @@
 {/snippet}
 
 {#snippet header()}
-	<Header {crumbs} {pills} />
-{/snippet}
-
-{#snippet verbRow()}
-	<VerbRow
-		object="#{number}"
+	<Header
+		{crumbs}
+		{pills}
 		{verbs}
 		active={view === 'since' ? 'since' : 'all'}
 		utility={{
@@ -572,7 +568,7 @@
 	</button>
 {/snippet}
 
-<Shell {sidebar} {header} verbs={verbRow} {panel}>
+<Shell {sidebar} {header} {panel}>
 	<div class="split">
 		<div class="screen">
 			{#if failure && !data}

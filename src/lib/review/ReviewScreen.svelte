@@ -18,7 +18,6 @@
 	import RightPanel from '$lib/ui/RightPanel.svelte';
 	import Shell from '$lib/ui/Shell.svelte';
 	import Sidebar from '$lib/ui/Sidebar.svelte';
-	import VerbRow from '$lib/ui/VerbRow.svelte';
 	import VirtualRows from '$lib/ui/VirtualRows.svelte';
 	import { copy } from '$lib/ui/clipboard';
 	import { ago, count } from '$lib/ui/format';
@@ -342,22 +341,14 @@
 {/snippet}
 
 {#snippet header()}
-	<Header {crumbs} {pills} />
-{/snippet}
-
-{#snippet verbRow()}
-	<VerbRow
-		object={selected ? `#${selected.number}` : `${repo.owner}/${repo.name}`}
-		{verbs}
-		{utility}
-	/>
+	<Header {crumbs} {pills} {verbs} {utility} />
 {/snippet}
 
 {#snippet panel()}
 	<RightPanel {visit} {about} open={openAgainst} />
 {/snippet}
 
-<Shell {sidebar} {header} verbs={verbRow} {panel}>
+<Shell {sidebar} {header} {panel}>
 	{#if failure && walk.items.length === 0}
 		<p class="fail" role="alert">
 			<b>{ERROR_LABEL[failure.kind]}</b>{failure.message}

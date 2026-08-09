@@ -19,7 +19,6 @@
 	import RightPanel from '$lib/ui/RightPanel.svelte';
 	import Shell from '$lib/ui/Shell.svelte';
 	import Sidebar from '$lib/ui/Sidebar.svelte';
-	import VerbRow from '$lib/ui/VerbRow.svelte';
 	import VirtualRows from '$lib/ui/VirtualRows.svelte';
 	import { copy } from '$lib/ui/clipboard';
 	import { ago, count } from '$lib/ui/format';
@@ -505,18 +504,14 @@
 {/snippet}
 
 {#snippet header()}
-	<Header {crumbs} {pills} />
-{/snippet}
-
-{#snippet verbRow()}
-	<VerbRow object={selected?.name ?? `${repo.owner}/${repo.name}`} {verbs} {utility} />
+	<Header {crumbs} {pills} {verbs} {utility} />
 {/snippet}
 
 {#snippet panel()}
 	<RightPanel since={since.label} visit={since.rows} {about} open={openAgainst} />
 {/snippet}
 
-<Shell {sidebar} {header} verbs={verbRow} {panel}>
+<Shell {sidebar} {header} {panel}>
 	<!-- The same split as the log: the list scrolls, the detail stays put, and
 	     the keyboard walks one with the other filling in place. -->
 	<div class="split">

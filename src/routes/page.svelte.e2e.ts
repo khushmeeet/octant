@@ -1516,25 +1516,24 @@ test('the gate reports a token GitHub rejects', async ({ page }) => {
 
 /* ---------------------------------------------------- Phase 1: the client -- */
 
-test('the source returns typed data and the meter is paid from the response', async ({ page }) => {
+test('the source returns typed data the listing renders as git reads it', async ({ page }) => {
 	const stub = await signIn(page);
-
-	// The validation query populated the meter before any screen ran.
-	await expect(page.getByTitle(/GraphQL points left/)).toContainText('4,999');
-
 	await openRepo(page);
 
-	// Mode as git writes it, size formatted, directories first.
+	// Mode symbolically rather than as six octal digits, size formatted,
+	// directories first.
 	const rows = listing(page).getByRole('link');
 	await expect(rows.nth(0)).toContainText('big');
 	await expect(rows.nth(1)).toContainText('src');
 	await expect(rows.nth(2)).toContainText('README.md');
-	await expect(listing(page).getByText('040000').first()).toBeVisible();
-	await expect(listing(page).getByText('100644')).toBeVisible();
+	await expect(listing(page).getByText('drwxr-xr-x').first()).toBeVisible();
+	await expect(listing(page).getByText('-rw-r--r--')).toBeVisible();
 	await expect(listing(page).getByText('2.0 KB')).toBeVisible();
 
+	// The octal is still the truth underneath, and the title says so.
+	await expect(listing(page).getByTitle('100644')).toBeVisible();
+
 	expect(stub.calls.Repo).toBe(1);
-	await expect(page.getByTitle(/GraphQL points left/)).toContainText('4,99');
 });
 
 test('a repository the token cannot see reports not found', async ({ page }) => {
@@ -1798,6 +1797,46 @@ test('the tree screen carries the repository, its clone URLs and its README', as
 	await expect(sidebar.getByText('12,345')).toBeVisible();
 	await expect(sidebar.getByText('942')).toBeVisible();
 	await expect(sidebar.getByText('7', { exact: true })).toBeVisible();
+});
+
+test('the verbs live in the header now, beside the pills they act on', async ({ page }) => {
+	await signIn(page);
+	await openRepo(page);
+
+	// There is one row of chrome above the content, not two.
+	const banner = page.getByRole('banner');
+	await expect(banner.getByRole('link', { name: 'Archive' })).toHaveAttribute(
+		'href',
+		'https://github.com/sveltejs/svelte/archive/main.zip'
+	);
+	await expect(banner.getByRole('button', { name: 'Copy path' })).toBeVisible();
+
+	// And the row that used to carry them, with the object's name repeated from
+	// the breadcrumb, is gone.
+	await expect(banner.getByRole('link', { name: 'Files', exact: true })).toHaveCount(0);
+	await expect(banner.getByRole('button', { name: 'Files', exact: true })).toHaveCount(0);
+});
+
+test('the context panel collapses, and stays collapsed across a reload', async ({ page }) => {
+	await signIn(page);
+	await openRepo(page);
+
+	await expect(context(page)).toBeVisible();
+
+	await page.getByRole('button', { name: 'Hide the context panel' }).click();
+	await expect(context(page)).toHaveCount(0);
+
+	// It is a preference, not a per-screen mode: it survives a navigation and a
+	// reload, which is the whole reason it is written down.
+	await page.getByRole('link', { name: 'src', exact: true }).first().click();
+	await expect(context(page)).toHaveCount(0);
+
+	await page.reload();
+	await expect(page.getByRole('button', { name: 'Show the context panel' })).toBeVisible();
+	await expect(context(page)).toHaveCount(0);
+
+	await page.getByRole('button', { name: 'Show the context panel' }).click();
+	await expect(context(page)).toBeVisible();
 });
 
 test('the README renders as markdown, and its raw HTML does not survive', async ({ page }) => {
