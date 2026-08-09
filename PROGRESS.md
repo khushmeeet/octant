@@ -16,7 +16,7 @@ got to.
 | 4 — File and blame | **Done** | 2026-08-08 |
 | 5 — Log | **Done** | 2026-08-08 |
 | 6 — Refs | **Done** | 2026-08-08 |
-| 7 — Review | Not started | — |
+| 7 — Review | **Done** | 2026-08-09 |
 | 8 — Since your last visit | Not started | — |
 | 9 — Command palette | Not started | — |
 | 10 — OAuth | Not started | — |
@@ -1179,23 +1179,262 @@ range is the first thing that will test them.
 
 ---
 
+## Phase 7 — Review
+
+**Done when:** you can do a real second-pass review of a PR that was force
+pushed, and see only what actually changed. ✅ — on a stubbed repository, and
+pinned by tests. The live-token qualifier under **Verification** still stands.
+
+### What was built
+
+Two screens again, and for once that is not the phase choosing: a pull request
+is a thing you triage and a thing you read, and the two want opposite shapes.
+Underneath them is the first use the `visits` store has ever had.
+
+| File | Role |
+|---|---|
+| `source/pulls.ts` | the `Pulls` document and `getPulls` — one page of the triage list |
+| `source/pull.ts` | the `Pull` document and `getPull` — one PR, its reviews, threads and checks |
+| `source/pull-files.ts` | `getPullFiles`: the PR files endpoint, paged, over REST |
+| `source/checks.ts` | check runs and commit statuses reconciled into one answer |
+| `visits/review.svelte.ts` | what we remember about reviewing a pull request |
+| `diff/notes.ts` | the key a marker on a diff line is addressed by |
+| `review/anchor.ts` | where a thread sits, and which files count as read |
+| `review/ReviewScreen.svelte` | the list: rows, filters, keyboard, verbs, panel |
+| `review/PullScreen.svelte` | the screen: two diffs, threads, mark-viewed, the record |
+| `review/Thread.svelte` | DESIGN.md §5's thread card |
+| `review/Threads.svelte` | the sidebar's `Threads` section |
+| `review/States.svelte` | the sidebar's `Scope` on the list — which states are shown |
+| `review/Avatar.svelte` | the only avatar in the app, and it degrades to an initial |
+| `routes/[owner]/[name]/pulls/+page.svelte` | pull requests, narrowed by state |
+| `routes/[owner]/[name]/pull/[number]/+page.svelte` | one pull request |
+
+Reworked: `Source` grew from nine methods to twelve; `Store` gained
+`visitsUnder` and `forget`, and `idb.ts` a prefix scan to implement them;
+`DiffView` learned markers, collapsed files and an extra control per file
+header, none of which a commit or a compare passes; `nav/paths.ts` gained
+`pullsHref`, `pullHref`, their parsers and `githubPullUrl`; `Sidebar` makes
+Review a destination, which is the last of the four; `Pill` gained a `warn`
+tone; `policy.ts` gained `FRESHNESS.pulls` and shortened `FRESHNESS.pull`.
+
+**The four nav items all go somewhere now.** Phase 0 drew them as local state
+and every phase since has turned one of them into a route. This is the first
+time the sidebar tells the whole truth.
+
+### Decisions
+
+**"Since my last review" is the default view, and the record is written by
+hand.** PLAN.md is explicit that it is the default rather than an option, which
+makes the `visits` store a Phase 7 dependency rather than a Phase 8 feature —
+a default view cannot wait for a later phase. What Phase 7 does *not* do is
+adopt ARCHITECTURE.md §6's "debounced on view" rule, and the reason is specific
+to this screen: recording the head SHA when the screen opens would empty the
+since-diff before you had read a line of it, and the next visit would show you
+nothing while the work you skipped sat behind it. So the record is written by
+the verb, and by marking the last file viewed — both of which are a person
+saying they are done rather than a screen assuming it. Everywhere else, Phase 8
+can debounce on view as written.
+
+**The force-push check is free.** ARCHITECTURE.md §6 describes detecting one by
+asking whether the current head descends from the recorded head, and PLAN.md
+warns that this is where the screen gets genuinely hard. The question turns out
+to be already answered by the read we were making anyway: a `base...head`
+comparison comes back `ahead` when the head descends from the base and
+`diverged` when it does not. One request produces the since-diff *and* the
+force-push verdict, and there is no second query to go stale or disagree.
+
+The cost is honesty about the diff's extent, and it is paid out loud. GitHub's
+compare is three-dot, measured from where the two commits last agreed — so
+after a rebase the range is wider than "what changed", because the merge base
+has moved back behind work you have already read. The screen says exactly that
+in amber rather than showing you the whole pull request under a heading that
+promises otherwise. GitHub's REST compare may accept two-dot ranges, which
+would be the precise answer; that is one of the things a live token can settle,
+and until it has, a stated overshoot beats an unverified request on the default
+view of the hardest screen.
+
+**A thread carries the commit it was written against, and that is the whole
+anchoring mechanism.** PLAN.md's "watch for" asks for the head SHA to be stored
+with every thread so a comment can be placed when its line has moved.
+`originalCommit { oid }` is that SHA and it costs one field. GitHub sends
+`line: null` once it can no longer place a thread on the current diff; the
+screen falls back to `originalLine`, marks the thread **Moved**, and names the
+commit that line number belonged to. Dropping the comment or pinning it to a
+line that now means something else are both worse than saying which version of
+the file it was about.
+
+**Threads read below the diff, not inside it.** DESIGN.md §5 draws the card
+indented 60px from the gutter, which reads as inline. The diff is one flat list
+of fixed-height rows — that is what holds §10's 60fps at 3,000 lines — and a
+variable-height card in the middle of it drifts the arithmetic the whole list
+depends on. So the anchored line takes a marker carrying its comment count, and
+the card opens in the pane below, which is the geography the log's commit
+detail and the refs screen's tag block already established. The card itself is
+§5's card unchanged; only its placement moved, and the budget is what moved it.
+
+**A pull request's diff is immutable, keyed by two commits.** It is the largest
+payload we fetch and the screen that fetches it is the one people sit on
+longest, so a 30-second window would have been the worst cache in the app. The
+diff is a function of the head *and* the base — GitHub recomputes the merge
+base when the target branch moves — so pinning both makes it permanent.
+`revKey` cannot decide this because it routes on one revision, the same reason
+`getCompare` writes its check out by hand.
+
+**REST pages by number, and the source hands back a synthetic cursor.**
+PROGRESS.md left this open: teach `PageOf` about both kinds of paging, or fake
+a cursor. A page number is a detail of one endpoint and `pages()` is the
+primitive four screens now depend on, so the fake cursor lives in `source.ts`
+and `pages()` never learns that REST exists. A page's `endCursor` is the page
+it was; the source turns it back into `page + 1` on the way in.
+
+**The since-comparison is read on both views, not just the one it draws.** It
+answers two questions and the second is needed either way: *what landed since*
+is the diff, and *what moved since* is what decides which of your viewed marks
+are still good. A whole-diff view that did not know would have to un-view every
+file on every push, which would make mark-viewed useless on exactly the pull
+requests it is for. It is a comparison between two SHAs, so it is asked for
+once ever.
+
+**Mark-viewed is two `visits` records and no new concepts.** A file marked
+viewed stores the head it was marked at; a pull request marked reviewed stores
+the same thing. A mark survives a push that did not touch its file, and is spent
+by one that did. `Store` grew one read — `visitsUnder(prefix)` — because asking
+one key at a time would be a round trip per file in the diff, and Phase 8's tree
+dots will want exactly the same read.
+
+**The list has no per-row read, including its CI column.** `commits(last: 1)`
+for the check rollup is one nested connection bounded by the page rather than by
+the repository, and the rollup is a stored field rather than a computed one — so
+it is nothing like the merge base `Ref.compare` asks for, which is why the refs
+list had to guard that one behind an `@include`. A triage list without a CI
+column is a list you have to open every row of.
+
+**Comment bodies go through our own Markdown parser.** Phase 3 settled this for
+READMEs and the argument is strictly stronger here: a README is written by
+whoever owns the repository, and a review comment is written by anyone who can
+comment on the pull request. ARCHITECTURE.md §11 lists the token in browser
+storage against "XSS is a real risk".
+
+**Amber gets its second meaning, and its first user.** DESIGN.md §3 spends
+amber on a force push you have not seen and on an unresolved thread. Both arrive
+in this phase, which is why `Pill` only gains a `warn` tone now — a colour with
+no meaning in use is a colour that drifts into decoration. Green and red stay
+diff state: a failing check is a word first and a tint second.
+
+**Replying links out.** ARCHITECTURE.md §1 puts writes out of scope and §12
+still asks whether review comments should be the exception. Until that is
+answered, a link that works beats a box that does not.
+
+### Deliberately deferred
+
+- **Two-dot compare for the since-diff.** The three-dot range overshoots after
+  a force push and the screen says so. GitHub's REST compare is documented to
+  accept `base..head`, which would be exact — but no read in this project has
+  met a real token yet, and an unverified request on the default view of the
+  hardest screen is the wrong place to find out. Try it the first afternoon
+  there is a token; it is a one-line change in `rest.ts`.
+- **No thread address in the URL.** The refs screen puts its selection in the
+  URL because "what shipped in v1.2.0" is a thing you send someone. A thread
+  cursor is closer to the log's: a place you pass through while reading. What
+  *is* addressable is the file (`#f-…`) and the line the thread hangs on, both
+  of which already have URLs. A dedicated thread address wants stable ids in
+  the URL and Phase 9's palette is the better door.
+- **Only the first 50 threads and 20 replies per thread.** Both are disclosed
+  when they bind rather than silently clipped. Paging them wants a second
+  `pages()` walk keyed off a document that is otherwise one round trip.
+- **No per-hunk "pushes since you reviewed" count.** DESIGN.md §5 puts one on
+  the hunk header. It needs per-line attribution across pushes, which is a blame
+  walk per hunk — the fan-out ARCHITECTURE.md §7 rules out. The screen answers
+  the same question once, at the top, from the comparison it already has.
+- **`mergeable` is asked for and may answer `UNKNOWN`.** GitHub computes it
+  lazily and the first ask can return before the job runs. The panel says
+  "Checking" rather than guessing. Re-asking on a timer is Phase 8's tick.
+- **Checks ride the pull request's freshness window**, which is now the shortest
+  in the app at 15s. A separate `Checks` document at its own rate would be a
+  second query per screen against ARCHITECTURE.md §4's one-query rule, for a
+  field that only moves while CI is running.
+- **The right panel's first block is real here and nowhere else.** This screen's
+  main view is computed from the visit record, so a placeholder above it would
+  have been a strange thing to look at. Every other screen keeps its three
+  dashes until Phase 8.
+
+### Verification
+
+`bun run check` (0 errors), `bun run lint` and `bun run build` all pass.
+`bunx playwright test --repeat-each=3` — 201 passed, no flakes. The suite is 67
+tests and runs in about 35 seconds.
+
+Twelve tests are new, and the phase is in these:
+
+- the triage list carries every pull request with its author, CI state and
+  review decision, in **one** query rather than one per row, with the three
+  right-panel blocks in fixed order;
+- Review is a link at last — the sidebar reaches it, and the state filter
+  re-scopes the screen to merged;
+- `j`/`k` move a selection that starts unset, and `enter` opens the review;
+- a **first pass** is the whole diff and the "since" verb is absent, because
+  there is nothing to be since — and the whole diff came from the PR files
+  endpoint, not from a comparison;
+- a **second pass** is the since-diff, chosen with no `?view=` in the URL: mark
+  reviewed, push, come back, and the screen has already decided;
+- a **force push** is detected from the comparison we were making anyway — one
+  request, `diverged` rather than `ahead`, and the notice says the diff below is
+  wider than the heading promises;
+- three threads arrive in the order the code is in rather than the order the
+  conversation happened in, the anchored lines carry markers, and the one whose
+  line has moved says which commit it was written against;
+- `j`/`k` walk the threads with the card filling in place, replies and all, and
+  `esc` closes it — and a `**bold**` body is parsed by us, never injected;
+- marking a file viewed collapses it to its header row, marking the last one
+  offers to record the review, and the marks survive a reload because they are
+  in IndexedDB;
+- a mark survives a push that did not touch its file and is spent by one that
+  did — which is the thing that keeps a push from restarting a review;
+- a 150-file diff is walked in two pages, and walking the whole thing again
+  after leaving the screen costs nothing however stale everything around it
+  goes;
+- hovering a row warms the review it opens, so `enter` fetches nothing.
+
+Both themes checked by screenshot at 1440px, along with the thread pane, the
+since-view banner and the <1060px breakpoint where the right panel hides.
+
+**Still not run against live GitHub.** Three documents are new and none has met
+a real token. `Pull` is the one to watch — it is the largest query in the app
+and three of its fields are guesses about behaviour rather than about shape:
+whether `mergeable` answers on the first ask or has to be re-read, whether
+`latestReviews` really is one review per reviewer, and what
+`reviewThreads.line` actually does on a thread GitHub has repositioned rather
+than dropped. `Pulls` is shape-checked only, and its `commits(last: 1)` rollup
+is the one field worth costing against the rate limit. And the PR files
+endpoint has never been paged for real: the synthetic cursor rests on
+`Link: rel="next"` being present and readable, which needs
+`Access-Control-Expose-Headers` from GitHub — the stub now sends it, precisely
+because the browser hides the header without it and the failure mode is a diff
+that silently stops at 100 files.
+
+---
+
 ## Carried forward
 
 Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
 
 - **Run every read against a real token.** `Repo`, `Tree`, `Blob`, `File`,
-  `Blame`, `Log` and `Refs` are schema-checked by hand and against stubs only,
-  and neither REST endpoint — the commit, now the compare — has been called for
-  real. This has been blocking since Phase 2 and is now seven documents deep.
-  Three most need a real repository: `Blame`, because it is the most expensive
-  field we ask for and whether its line numbers line up with `Blob.text` exactly
-  is not something a stub can answer; `Log`, because the whole pagination design
-  rests on a cursor still addressing the same position in the walk it came from;
-  and `Refs`, because `Ref.compare`'s direction is read from GitHub's wording
-  rather than from a response, and a whole column depends on getting it the
-  right way round. **This is now the largest single risk in the project** — six
-  screens are built on documents no server has ever validated, and one afternoon
-  with a token would retire most of it.
+  `Blame`, `Log`, `Refs`, `Pulls` and `Pull` are schema-checked by hand and
+  against stubs only, and no REST endpoint — the commit, the compare, now the
+  pull request's files — has been called for real. This has been blocking since
+  Phase 2 and is now nine documents deep across eight screens. Four most need a
+  real repository: `Blame`, because it is the most expensive field we ask for
+  and whether its line numbers line up with `Blob.text` exactly is not something
+  a stub can answer; `Log`, because the whole pagination design rests on a
+  cursor still addressing the same position in the walk it came from; `Refs`,
+  because `Ref.compare`'s direction is read from GitHub's wording rather than
+  from a response, and a whole column depends on getting it the right way round;
+  and now `Pull`, whose `mergeable`, `latestReviews` and repositioned-thread
+  `line` are guesses about *behaviour* rather than about shape — the first three
+  of that kind in the project. **This is by a distance the largest single risk
+  here**, and one afternoon with a token would retire most of it. It would also
+  settle two-dot compare, which is the one thing standing between the Review
+  screen's default view and an exact answer.
 - **`PLAN.md`'s checkpoints are both open now.** The first asks whether the
   right panel's shape is right; three screens share it and none has argued for a
   different order, but that is an observation from building them rather than
@@ -1208,6 +1447,15 @@ Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
   order either, though it did want a block whose rows are not key/value pairs —
   the tag's shortlog went in the detail pane rather than the panel, which is the
   first time a screen has had something the panel's shape could not hold.
+  **Phase 7's checkpoint is now open too**, and it is the sharpest of the three:
+  does "since my last review" work as the default, or is it disorienting? The
+  argument for it is that a second pass on a 40-file pull request is a different
+  task from a first pass, and the argument against is that the diff you are
+  shown depends on a record you cannot see. Two things were built to soften
+  that and both want watching in use — the banner names the range every time,
+  and the verb is simply absent on a first pass rather than greyed. Phase 7 is
+  also a fourth data point for the first checkpoint, and the first screen whose
+  "since your last visit" block has real rows in it: the order still holds.
 - **The highlighter is a subset, and use is what will show where.** It reads the
   languages listed in `code/lang.ts`, some of them through a neighbour's grammar
   — Kotlin and Swift through Java's, PHP through C's. Note which files read badly
@@ -1224,38 +1472,45 @@ Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
   filing it under both would give a file that did not change between two branches
   one cache entry instead of two. It needs `settle()` to accept a second key,
   which is a change to the write path and not to a screen.
-- **The in-memory layer is still not needed.** Deferred in Phase 2, asked again
-  in Phases 4 and 5. The Refs screen reads three entries at once — two ref pages
-  and a comparison — and it is still not felt, for the same reason: a page is one
-  entry rather than a hundred. Phase 7 is the real test, where a PR's file list
-  and its threads are read together.
-- **Pagination is settled: `pages()`.** Phase 5 answered the question Phase 2
-  left open, and Phase 7 should walk the PR file list with the same primitive
-  rather than growing a second one. The one thing it does not do is REST
-  pagination by page *number* — `pullFiles` takes `page`, not a cursor, so
-  either the source hands back a synthetic cursor or `PageOf` learns about both.
-  Decide when the file list is built, not before.
-- **The compare screen is most of what "since my last review" needs.** Phase 7's
-  default view is `storedHeadSha...currentHeadSha` (`ARCHITECTURE.md` §6), which
-  is the read and the render this phase built. What it does not have is the
-  `visits` half — the stored head SHA, and the force-push check that decides
-  whether the old one is still reachable. Build the review screen on
-  `CompareScreen`'s shape rather than beside it.
-- **`getCompare` does not paginate.** REST sends at most 250 commits and 300
-  files and `truncated` says so honestly, which is the right answer for a
-  release range. A pull request's file list is the case that needs real paging,
-  and `pullFiles` takes a page *number* rather than a cursor — see the
-  pagination item above.
+- **The in-memory layer is still not needed, and Phase 7 was the test.** The
+  Review screen reads four entries at once — the repository, the pull request,
+  the since-comparison and a page of the diff — plus a `visits` prefix scan, and
+  it is still not felt. The reason has not changed since Phase 2: a page is one
+  entry rather than a hundred. What did appear is a second kind of read against
+  IndexedDB, the prefix cursor, and that one *is* per-file. It is a single
+  transaction and it runs once per pull request, so it is fine; if Phase 8 puts
+  a prefix scan behind every tree row, measure before believing that.
+- **Pagination is settled twice over: `pages()`, and the cursor may be
+  synthetic.** Phase 5 answered the question Phase 2 left open; Phase 7 answered
+  the one Phase 5 left. A page-numbered REST endpoint is walked by having the
+  *source* spell the page as a cursor, so `pages()` never learns that REST
+  exists. Any future endpoint that pages by number should do the same rather
+  than teaching `PageOf` a second mode.
+- **`visits` is open for business, and Phase 8 owns the rest of it.** Phase 7
+  used exactly two records — the head you last reviewed a pull request at, and
+  the head you marked each of its files viewed at — plus one new `Store` read,
+  `visitsUnder(prefix)`, which the tree's per-row dots will want unchanged. Two
+  things are deliberately left for Phase 8 and should not be copied from here:
+  recording on view (the Review screen records by hand, and says why), and any
+  general "since your last visit" computation. `CODEOWNERS`, the ownership dots
+  and the background revalidation tick are untouched.
+- **`getCompare` still does not paginate**, and now that matters in one more
+  place: the since-diff is a comparison, so a review of a range past REST's 250
+  commits or 300 files is capped rather than paged. `truncated` says so. It is
+  the right answer for a release range and an acceptable one for a review that
+  large, but it is the honest limit of the default view.
 - **Eviction has never run under real pressure.** The ceiling is exercised by
   test; the quota path is not, because a headless browser's quota is enormous.
   This matters more with every phase: file contents were the first thing we
-  cached measured in hundreds of kilobytes, and a commit's patches are the
-  second.
-- **Five pure modules have no tests of their own**, and one of them is now
-  overdue. The Markdown parser, the scanner, the graph, the patch parser and now
-  the shortlog are all covered through the screens that render them, which is the
-  right level while each has one caller. The patch parser no longer does — Phase
-  6's compare screen is its second — so the direct test Phase 5 promised on that
-  condition falls due now rather than in Phase 7. The graph is still the other
-  one worth doing, because its output is a *diagram* and a wrong answer there
-  reads as a rendering quirk rather than as a failure.
+  cached measured in hundreds of kilobytes, a commit's patches were the second,
+  and a pull request's whole diff — filed permanently, a hundred files a page —
+  is now the third and the largest.
+- **Seven pure modules have no tests of their own, and two are now overdue.**
+  The Markdown parser, the scanner, the graph, the patch parser, the shortlog
+  and now `review/anchor.ts` and `source/checks.ts` are all covered only through
+  the screens that render them — the right level while each has one caller.
+  Three no longer qualify. The patch parser has three callers as of this phase;
+  `checks.ts` has two documents; and `anchor.ts` is the one to write first,
+  because thread placement is wrong in a way you cannot see — a comment on the
+  wrong line reads as a rendering quirk rather than as a failure, which is the
+  same argument that has kept the graph on this list since Phase 5.

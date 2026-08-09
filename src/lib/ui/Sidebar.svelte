@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { session } from '$lib/auth/token.svelte';
-	import { logHref, refsHref, repoHref } from '$lib/nav/paths';
+	import { logHref, pullsHref, refsHref, repoHref } from '$lib/nav/paths';
 	import type { RepoSummary } from '$lib/source';
 	import Icon from './Icon.svelte';
 	import { count } from './format';
@@ -12,12 +12,10 @@
 	 * ARCHITECTURE.md §2. Four items, and branches and tags share one screen
 	 * because they are the same object.
 	 *
-	 * Phase 3 replaced Phase 0's local `active` state with the route, Phase 5
-	 * makes Log a real destination and Phase 6 does the same for Refs. Review is
-	 * still rendered but not reachable: its count is real and comes from the
-	 * repository summary we already hold, and the item says plainly that the
-	 * screen is not built rather than linking somewhere that isn't there. An
-	 * honest dead end beats a stub route.
+	 * Phase 3 replaced Phase 0's local `active` state with the route; Phase 5
+	 * made Log a destination, Phase 6 did the same for Refs, and Phase 7 closes
+	 * the set — every one of the four now goes somewhere, which is the first
+	 * time the sidebar has told the whole truth.
 	 */
 	export type NavId = 'tree' | 'log' | 'refs' | 'review';
 
@@ -38,6 +36,8 @@
 		logCount?: number | null;
 		/** Refs on screen, when a screen knows better than the summary does. */
 		refsCount?: number | null;
+		/** Pull requests in the state on screen, which is not always the open ones. */
+		reviewCount?: number | null;
 		/** Contextual section heading — `Files`, `Symbols`, `Scope`, `Threads`. */
 		section?: string;
 		/** The contextual section's body. */
@@ -51,6 +51,7 @@
 		treeCount = null,
 		logCount = null,
 		refsCount = null,
+		reviewCount = null,
 		section = 'Files',
 		children
 	}: Props = $props();
@@ -104,8 +105,11 @@
 			id: 'review',
 			label: 'Review',
 			icon: 'pr',
-			count: repo?.counts.openPullRequests ?? null,
-			href: null,
+			// Open pull requests unless a screen is showing another state, which
+			// is the same rule the Tree, Log and Refs items have followed since
+			// they became destinations.
+			count: reviewCount ?? repo?.counts.openPullRequests ?? null,
+			href: repo ? pullsHref(repo) : null,
 			phase: 7
 		}
 	]);

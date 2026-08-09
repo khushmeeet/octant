@@ -545,6 +545,25 @@ function tagNode(tag: TagStub) {
  */
 function restCompare(range: string) {
 	const [base = '', head = ''] = range.split('...');
+
+	// A force push, as GitHub reports one: the old head is still reachable, but
+	// it is no longer an ancestor of the new one, so the two have *diverged*
+	// rather than the new one being ahead. That single word is the whole of
+	// Phase 7's force-push detection.
+	if (base === STALE_HEAD) {
+		const between = HISTORY.filter((commit) => commit.n === 108 || commit.n === 109);
+		return {
+			status: 'diverged',
+			ahead_by: 2,
+			behind_by: 1,
+			total_commits: between.length,
+			base_commit: { sha: base, commit: { message: '', author: null }, author: null },
+			merge_base_commit: { sha: sha(107), commit: { message: '', author: null }, author: null },
+			commits: between.map(compareCommit),
+			files: PULL_FILES[6] ?? []
+		};
+	}
+
 	const from = AS_COMMIT.get(base);
 	const to = AS_COMMIT.get(head);
 
@@ -568,19 +587,23 @@ function restCompare(range: string) {
 		total_commits: between.length,
 		base_commit: { sha: base, commit: { message: '', author: null }, author: null },
 		merge_base_commit: { sha: base, commit: { message: '', author: null }, author: null },
-		commits: between.map((commit) => ({
-			sha: sha(commit.n),
-			commit: {
-				message: [commit.headline, commit.body].filter(Boolean).join('\n\n'),
-				author: {
-					name: commit.author === 'simon' ? 'Simon' : 'Rich Harris',
-					email: 'dev@svelte.dev',
-					date: commitDate(commit.n)
-				}
-			},
-			author: { login: commit.author }
-		})),
+		commits: between.map(compareCommit),
 		files: [...files.values()]
+	};
+}
+
+function compareCommit(commit: HistoryStub) {
+	return {
+		sha: sha(commit.n),
+		commit: {
+			message: [commit.headline, commit.body].filter(Boolean).join('\n\n'),
+			author: {
+				name: commit.author === 'simon' ? 'Simon' : 'Rich Harris',
+				email: 'dev@svelte.dev',
+				date: commitDate(commit.n)
+			}
+		},
+		author: { login: commit.author }
 	};
 }
 
@@ -627,6 +650,331 @@ function restCommit(oid: string) {
 	};
 }
 
+/* ---------------------------------------------------- Phase 7: the review -- */
+
+/**
+ * The head #6 had before it was rebased. It is deliberately *not* one of the
+ * history's commits: a force-pushed SHA is reachable through the pull request's
+ * timeline and nowhere else, which is exactly the situation the "since my last
+ * review" diff has to survive.
+ */
+const STALE_HEAD = 'cafe0000cafe0000cafe0000cafe0000cafe0000';
+
+interface PullStub {
+	number: number;
+	title: string;
+	state: 'OPEN' | 'CLOSED' | 'MERGED';
+	isDraft: boolean;
+	head: string;
+	headOid: string;
+	base: string;
+	author: string;
+	additions: number;
+	deletions: number;
+	changedFiles: number;
+	comments: number;
+	decision: string | null;
+	/** The rollup GitHub reports for the head commit. */
+	checks: 'SUCCESS' | 'FAILURE' | 'PENDING' | null;
+	mergeable?: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN';
+}
+
+const PULLS: PullStub[] = [
+	{
+		number: 7,
+		title: 'Rewrite the parser',
+		state: 'OPEN',
+		isDraft: false,
+		head: 'parser-rewrite',
+		headOid: sha(105),
+		base: 'main',
+		author: 'simon',
+		additions: 40,
+		deletions: 12,
+		changedFiles: 2,
+		comments: 4,
+		decision: 'REVIEW_REQUIRED',
+		checks: 'FAILURE',
+		mergeable: 'MERGEABLE'
+	},
+	{
+		number: 6,
+		title: 'Inline the parser call',
+		state: 'OPEN',
+		isDraft: false,
+		head: 'inline-parse',
+		headOid: STALE_HEAD,
+		base: 'main',
+		author: 'rich',
+		additions: 12,
+		deletions: 3,
+		changedFiles: 1,
+		comments: 0,
+		decision: 'APPROVED',
+		checks: 'SUCCESS',
+		mergeable: 'CONFLICTING'
+	},
+	{
+		number: 5,
+		title: 'Document the new flag',
+		state: 'MERGED',
+		isDraft: false,
+		head: 'docs',
+		headOid: sha(107),
+		base: 'main',
+		author: 'rich',
+		additions: 4,
+		deletions: 0,
+		changedFiles: 1,
+		comments: 1,
+		decision: null,
+		checks: 'SUCCESS'
+	},
+	{
+		number: 4,
+		title: 'Type the whole compiler',
+		state: 'OPEN',
+		isDraft: true,
+		head: 'types',
+		headOid: sha(103),
+		base: 'main',
+		author: 'simon',
+		additions: 300,
+		deletions: 150,
+		// Past one page of GitHub's file endpoint, which is what makes the walk
+		// a walk rather than a single read.
+		changedFiles: 150,
+		comments: 0,
+		decision: null,
+		checks: null
+	}
+];
+
+const BY_NUMBER = new Map(PULLS.map((pull) => [pull.number, pull]));
+
+/** One page of a large diff, so the second page is a different set of rows. */
+const WIDE_FILES: DiffFileStub[] = Array.from({ length: 150 }, (_, i) => ({
+	filename: `src/typed-${String(i).padStart(3, '0')}.ts`,
+	status: 'modified',
+	additions: 2,
+	deletions: 1,
+	patch: ['@@ -1,1 +1,2 @@', ' const a = 1;', '+const b = 2;'].join('\n')
+}));
+
+const PULL_FILES: Record<number, DiffFileStub[]> = {
+	7: [
+		{
+			filename: 'src/compiler.js',
+			status: 'modified',
+			additions: 12,
+			deletions: 3,
+			patch: COMPILER_PATCH
+		},
+		{
+			filename: 'src/App.svelte',
+			status: 'renamed',
+			previous_filename: 'src/Old.svelte',
+			additions: 28,
+			deletions: 9,
+			patch: COMPILER_PATCH
+		}
+	],
+	6: [
+		{
+			filename: 'src/compiler.js',
+			status: 'modified',
+			additions: 12,
+			deletions: 3,
+			patch: COMPILER_PATCH
+		}
+	],
+	5: [
+		{ filename: 'README.md', status: 'modified', additions: 4, deletions: 0, patch: COMPILER_PATCH }
+	],
+	4: WIDE_FILES
+};
+
+interface ThreadStub {
+	id: string;
+	path: string;
+	/** Where it sits on the diff now. `null` once the line has moved. */
+	line: number | null;
+	originalLine: number;
+	side: 'LEFT' | 'RIGHT';
+	isResolved: boolean;
+	comments: { author: string; body: string; commit: string }[];
+}
+
+/**
+ * Three threads over two files, and the middle one has lost its line. That is
+ * the case PLAN.md Phase 7 warns about: GitHub sends `line: null` and only
+ * `originalLine` survives, so the only thing that can place the comment is the
+ * commit it was written against.
+ */
+const THREADS: ThreadStub[] = [
+	{
+		id: 'T_app',
+		path: 'src/App.svelte',
+		line: 3,
+		originalLine: 3,
+		side: 'RIGHT',
+		isResolved: false,
+		comments: [
+			{ author: 'rich', body: 'This import is doing **two** things.', commit: sha(105) },
+			{ author: 'simon', body: 'Split in the next push.', commit: sha(105) }
+		]
+	},
+	{
+		id: 'T_moved',
+		path: 'src/compiler.js',
+		line: null,
+		originalLine: 9,
+		side: 'RIGHT',
+		isResolved: false,
+		comments: [{ author: 'rich', body: 'Was this ever measured?', commit: sha(101) }]
+	},
+	{
+		id: 'T_done',
+		path: 'src/compiler.js',
+		line: 3,
+		originalLine: 3,
+		side: 'RIGHT',
+		isResolved: true,
+		comments: [{ author: 'simon', body: 'Fixed.', commit: sha(105) }]
+	}
+];
+
+const CHECK_RUNS: Record<string, unknown[]> = {
+	FAILURE: [
+		{
+			__typename: 'CheckRun',
+			name: 'unit',
+			conclusion: 'SUCCESS',
+			status: 'COMPLETED',
+			detailsUrl: null
+		},
+		{
+			__typename: 'CheckRun',
+			name: 'lint',
+			conclusion: 'FAILURE',
+			status: 'COMPLETED',
+			detailsUrl: null
+		}
+	],
+	SUCCESS: [
+		{
+			__typename: 'CheckRun',
+			name: 'unit',
+			conclusion: 'SUCCESS',
+			status: 'COMPLETED',
+			detailsUrl: null
+		},
+		{ __typename: 'StatusContext', context: 'ci/legacy', state: 'SUCCESS', targetUrl: null }
+	],
+	PENDING: [
+		{
+			__typename: 'CheckRun',
+			name: 'unit',
+			conclusion: null,
+			status: 'IN_PROGRESS',
+			detailsUrl: null
+		}
+	]
+};
+
+function rollup(state: string | null) {
+	if (!state) return null;
+	const nodes = CHECK_RUNS[state] ?? [];
+	return { state, contexts: { totalCount: nodes.length, nodes } };
+}
+
+function pullListNode(pull: PullStub) {
+	return {
+		number: pull.number,
+		title: pull.title,
+		state: pull.state,
+		isDraft: pull.isDraft,
+		createdAt: commitDate(90),
+		updatedAt: commitDate(100 + pull.number),
+		baseRefName: pull.base,
+		headRefName: pull.head,
+		headRefOid: pull.headOid,
+		additions: pull.additions,
+		deletions: pull.deletions,
+		changedFiles: pull.changedFiles,
+		author: { login: pull.author },
+		reviewDecision: pull.decision,
+		comments: { totalCount: pull.comments },
+		commits: { nodes: [{ commit: { statusCheckRollup: rollup(pull.checks) } }] }
+	};
+}
+
+function threadNode(thread: ThreadStub) {
+	return {
+		id: thread.id,
+		isResolved: thread.isResolved,
+		isOutdated: thread.line === null,
+		path: thread.path,
+		line: thread.line,
+		startLine: null,
+		originalLine: thread.originalLine,
+		diffSide: thread.side,
+		resolvedBy: thread.isResolved ? { login: 'rich' } : null,
+		comments: {
+			totalCount: thread.comments.length,
+			nodes: thread.comments.map((comment, i) => ({
+				id: `${thread.id}-${i}`,
+				author: { login: comment.author, avatarUrl: `https://avatars.test/${comment.author}.png` },
+				body: comment.body,
+				createdAt: commitDate(100),
+				outdated: thread.line === null,
+				originalCommit: { oid: comment.commit },
+				url: `https://github.com/sveltejs/svelte/pull/7#discussion_${thread.id}`
+			}))
+		}
+	};
+}
+
+function pullDetailNode(pull: PullStub, headOid: string) {
+	return {
+		...pullListNode(pull),
+		headRefOid: headOid,
+		body: 'The parser rewrite, at last.',
+		isCrossRepository: false,
+		mergedAt: pull.state === 'MERGED' ? commitDate(108) : null,
+		closedAt: null,
+		baseRefOid: HEAD,
+		mergeable: pull.mergeable ?? 'UNKNOWN',
+		url: `https://github.com/sveltejs/svelte/pull/${pull.number}`,
+		author: { login: pull.author, avatarUrl: `https://avatars.test/${pull.author}.png` },
+		totalCommits: { totalCount: 3 },
+		commits: { nodes: [{ commit: { oid: headOid, statusCheckRollup: rollup(pull.checks) } }] },
+		latestReviews: {
+			nodes:
+				pull.decision === 'APPROVED'
+					? [
+							{
+								id: 'R1',
+								state: 'APPROVED',
+								author: { login: 'rich', avatarUrl: null },
+								submittedAt: commitDate(107),
+								body: '',
+								url: ''
+							}
+						]
+					: []
+		},
+		reviewThreads:
+			pull.number === 7
+				? {
+						totalCount: THREADS.length,
+						pageInfo: { hasNextPage: false },
+						nodes: THREADS.map(threadNode)
+					}
+				: { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] }
+	};
+}
+
 interface Body {
 	operationName?: string;
 	variables?: Record<string, string | number | boolean | null>;
@@ -661,6 +1009,14 @@ interface Stub {
 	readonly refs: Record<string, number>;
 	/** Compare requests per `base...head`. A tag's changelog turns on this. */
 	readonly compares: Record<string, number>;
+	/** Pull request list requests per state filter. */
+	readonly pulls: Record<string, number>;
+	/** One pull request's own query, per number. */
+	readonly pull: Record<string, number>;
+	/** The REST file endpoint, per `number:page`. The heaviest read in the app. */
+	readonly pullFiles: Record<string, number>;
+	/** Move a pull request's head, as a push does. */
+	push(number: number, oid: string): void;
 	/** Replace the handler for one operation mid-test. */
 	on(
 		operation: string,
@@ -681,6 +1037,16 @@ async function signIn(page: Page): Promise<Stub> {
 	const commits: Record<string, number> = {};
 	const refs: Record<string, number> = {};
 	const compares: Record<string, number> = {};
+	const pulls: Record<string, number> = {};
+	const pull: Record<string, number> = {};
+	const pullFiles: Record<string, number> = {};
+
+	/**
+	 * The head a pull request currently reports. Mutable so a test can push to a
+	 * branch mid-session, which is the only way to have a *last* review that is
+	 * not also the current one.
+	 */
+	const heads = new Map(PULLS.map((entry) => [entry.number, entry.headOid]));
 
 	const handlers: Record<
 		string,
@@ -840,6 +1206,50 @@ async function signIn(page: Page): Promise<Stub> {
 					rateLimit: rateLimit(4992)
 				}
 			});
+		},
+		Pulls: (route, variables) => {
+			const states = variables.states as unknown as string[] | null;
+			const key = states ? states.join('+') : 'all';
+			pulls[key] = (pulls[key] ?? 0) + 1;
+
+			const all = PULLS.filter((entry) => !states || states.includes(entry.state)).map((entry) =>
+				pullListNode({ ...entry, headOid: heads.get(entry.number) ?? entry.headOid })
+			);
+
+			const first = Number(variables.first ?? 50);
+			const after = variables.after == null ? null : String(variables.after);
+			const start = after ? Number(after) + 1 : 0;
+			const slice = all.slice(start, start + first);
+
+			return json(route, {
+				data: {
+					repository: {
+						pullRequests: {
+							totalCount: all.length,
+							pageInfo: {
+								hasNextPage: start + slice.length < all.length,
+								endCursor: slice.length > 0 ? String(start + slice.length - 1) : null
+							},
+							nodes: slice
+						}
+					},
+					rateLimit: rateLimit(4991)
+				}
+			});
+		},
+		Pull: (route, variables) => {
+			const number = Number(variables.number ?? 0);
+			pull[String(number)] = (pull[String(number)] ?? 0) + 1;
+
+			const found = BY_NUMBER.get(number);
+			return json(route, {
+				data: {
+					repository: {
+						pullRequest: found ? pullDetailNode(found, heads.get(number) ?? found.headOid) : null
+					},
+					rateLimit: rateLimit(4990)
+				}
+			});
 		}
 	};
 
@@ -855,6 +1265,40 @@ async function signIn(page: Page): Promise<Stub> {
 		const range = decodeURIComponent(route.request().url().split('/compare/').pop() ?? '');
 		compares[range] = (compares[range] ?? 0) + 1;
 		await json(route, restCompare(range));
+	});
+
+	// A pull request's own diff. A regular expression rather than a glob, because
+	// this is the one endpoint we call with a query string.
+	await page.route(/\/repos\/[^/]+\/[^/]+\/pulls\/\d+\/files/, async (route) => {
+		const url = new URL(route.request().url());
+		const number = Number(url.pathname.split('/').at(-2));
+		const perPage = Number(url.searchParams.get('per_page') ?? 100);
+		const pageNumber = Number(url.searchParams.get('page') ?? 1);
+
+		pullFiles[`${number}:${pageNumber}`] = (pullFiles[`${number}:${pageNumber}`] ?? 0) + 1;
+
+		const all = PULL_FILES[number] ?? [];
+		const start = (pageNumber - 1) * perPage;
+		const slice = all.slice(start, start + perPage);
+
+		const more = start + slice.length < all.length;
+
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			// `Link: rel="next"` is how REST says there is another page, and it is
+			// the only thing `pages()` has to go on for this endpoint. It is not a
+			// CORS-safelisted response header, so GitHub exposes it explicitly —
+			// and so must the stub, or the browser hides it from us exactly as it
+			// would in production.
+			headers: {
+				'access-control-expose-headers': 'Link, ETag',
+				...(more
+					? { link: `<${url.origin}${url.pathname}?page=${pageNumber + 1}>; rel="next"` }
+					: {})
+			},
+			body: JSON.stringify(slice)
+		});
 	});
 
 	await page.route(GRAPHQL, async (route) => {
@@ -883,6 +1327,12 @@ async function signIn(page: Page): Promise<Stub> {
 		commits,
 		refs,
 		compares,
+		pulls,
+		pull,
+		pullFiles,
+		push(number, oid) {
+			heads.set(number, oid);
+		},
 		on(operation, handler) {
 			handlers[operation] = handler;
 		}
@@ -2211,4 +2661,352 @@ test('the kind filter narrows the screen, and the ref filter narrows the list', 
 	await page.keyboard.type('release');
 	await expect(refList(page).getByRole('link')).toHaveCount(1);
 	await expect(refList(page).getByRole('link').first()).toContainText('release/1.0');
+});
+
+/* --------------------------------------------- Phase 7: review and threads -- */
+
+const PULLS_URL = '/sveltejs/svelte/pulls';
+
+function pullList(page: Page) {
+	return page.getByRole('navigation', { name: 'Pull requests' });
+}
+
+function threadList(page: Page) {
+	return page.getByRole('group', { name: 'Review threads' });
+}
+
+async function openPulls(page: Page, at = PULLS_URL) {
+	await page.goto(at);
+	await expect(pullList(page).getByRole('link', { name: /Rewrite the parser/ })).toBeVisible();
+}
+
+async function openPull(page: Page, number = 7) {
+	await page.goto(`/sveltejs/svelte/pull/${number}`);
+	await expect(page.getByRole('heading', { level: 1 })).toContainText(`#${number}`);
+}
+
+test('the review list carries every pull request, paid for with one query', async ({ page }) => {
+	const stub = await signIn(page);
+	await openPulls(page);
+
+	// Three open, and the draft is one of them — a draft is an open pull request
+	// with a flag, not a fourth state.
+	const rows = pullList(page).getByRole('link');
+	await expect(rows).toHaveCount(3);
+	await expect(rows.nth(0)).toContainText('Rewrite the parser');
+	await expect(rows.nth(0)).toContainText('simon');
+	await expect(rows.nth(0)).toContainText('failing');
+	await expect(rows.nth(1)).toContainText('approved');
+	await expect(rows.nth(2)).toContainText('draft');
+
+	// One query for the page, not one per row: everything a row shows — the
+	// check rollup included — arrived with the row.
+	expect(stub.calls.Pulls).toBe(1);
+	expect(stub.calls.Pull ?? 0).toBe(0);
+
+	// The right panel keeps its three blocks in the fixed order, on this screen
+	// as on every other.
+	const panel = page.getByRole('complementary', { name: 'Context' });
+	await expect(panel.getByRole('heading')).toHaveText([
+		'Since your last visit',
+		'About',
+		'Open against it'
+	]);
+});
+
+test('Review is a destination at last, and the state filter re-scopes it', async ({ page }) => {
+	await signIn(page);
+	await openRepo(page);
+
+	// Phase 3 through 6 rendered this item as an honest dead end. It is a link now.
+	await page
+		.getByRole('navigation', { name: 'Primary' })
+		.getByRole('link', { name: /Review/ })
+		.click();
+	await expect(page).toHaveURL(PULLS_URL);
+
+	await page
+		.getByRole('navigation', { name: 'Primary' })
+		.getByRole('link', { name: /^Merged/ })
+		.click();
+	await expect(page).toHaveURL(`${PULLS_URL}?state=merged`);
+
+	const rows = pullList(page).getByRole('link');
+	await expect(rows).toHaveCount(1);
+	await expect(rows.first()).toContainText('Document the new flag');
+});
+
+test('j and k move a selection that starts unset, and enter opens the review', async ({ page }) => {
+	await signIn(page);
+	await openPulls(page);
+
+	// A screen you have just opened does not claim one of its rows is special.
+	await expect(pullList(page).locator('[aria-current="true"]')).toHaveCount(0);
+
+	await page.keyboard.press('j');
+	await expect(pullList(page).locator('[aria-current="true"]')).toContainText('Rewrite the parser');
+	await page.keyboard.press('j');
+	await expect(pullList(page).locator('[aria-current="true"]')).toContainText(
+		'Inline the parser call'
+	);
+	await page.keyboard.press('k');
+	await expect(pullList(page).locator('[aria-current="true"]')).toContainText('Rewrite the parser');
+
+	await page.keyboard.press('Enter');
+	await expect(page).toHaveURL('/sveltejs/svelte/pull/7');
+	await expect(page.getByRole('heading', { level: 1 })).toContainText('Rewrite the parser');
+});
+
+test('a first pass is the whole diff, and there is no "since" verb to offer', async ({ page }) => {
+	const stub = await signIn(page);
+	await openPull(page);
+
+	// Nothing has been reviewed, so there is nothing to be since — and a verb
+	// that cannot act is absent, which has been the rule since Phase 3.
+	await expect(page.getByRole('link', { name: 'Since my last review' })).toHaveCount(0);
+	await expect(page.getByRole('link', { name: 'Whole diff', exact: true })).toBeVisible();
+
+	// The diff came from the pull request's own file endpoint, in one page.
+	await expect(page.getByText('src/compiler.js').first()).toBeVisible();
+	await expect(page.getByText('src/App.svelte').first()).toBeVisible();
+	await expect(page.getByText('← src/Old.svelte')).toBeVisible();
+	expect(stub.pullFiles['7:1']).toBe(1);
+	expect(stub.compares[`${sha(105)}...${sha(105)}`] ?? 0).toBe(0);
+
+	// Checks and conflicts are read off the same query the screen is built from.
+	await expect(page.getByText('1 check failing')).toBeVisible();
+	const panel = page.getByRole('complementary', { name: 'Context' });
+	await expect(panel).toContainText('Checks failing');
+	await expect(panel).toContainText('Unresolved');
+});
+
+test('a second pass is the diff since the last review, and it is the default view', async ({
+	page
+}) => {
+	const stub = await signIn(page);
+	await openPull(page);
+
+	// Say you are done. That is what records the head — nothing about opening
+	// the screen does, or the next visit would show you nothing.
+	await page.getByRole('button', { name: 'Mark reviewed' }).click();
+	await expect(page.getByRole('button', { name: 'Recorded' })).toBeVisible();
+
+	// Somebody pushes. The pull request query is mutable and still inside its
+	// window, so age it — otherwise the screen is correctly showing the head it
+	// was told about a moment ago.
+	stub.push(7, sha(109));
+	await expireMutable(page);
+	await openPull(page);
+
+	// No `?view=` in the URL, and the screen chose the since-diff anyway.
+	await expect(page).toHaveURL('/sveltejs/svelte/pull/7');
+	await expect(
+		page.getByRole('status').filter({ hasText: 'Since your last review' })
+	).toContainText(sha(105).slice(0, 7));
+	await expect.poll(() => stub.compares[`${sha(105)}...${sha(109)}`] ?? 0).toBe(1);
+
+	const panel = page.getByRole('complementary', { name: 'Context' });
+	await expect(panel).toContainText('Reviewed at');
+	await expect(panel).toContainText(sha(105).slice(0, 7));
+	await expect(panel).toContainText('Commits since');
+
+	// And the whole diff is still one verb away, which is what makes the default
+	// a default rather than a trap. It is a second read because the head moved —
+	// the diff is keyed by the two commits it is a function of, so a new head is
+	// a different object and not a stale copy of the old one.
+	await page.getByRole('link', { name: 'Whole diff', exact: true }).click();
+	await expect(page).toHaveURL('/sveltejs/svelte/pull/7?view=all');
+	await expect.poll(() => stub.pullFiles['7:1'] ?? 0).toBe(2);
+});
+
+test('a force push is detected from the comparison we were making anyway', async ({ page }) => {
+	const stub = await signIn(page);
+	await openPull(page, 6);
+
+	await page.getByRole('button', { name: 'Mark reviewed' }).click();
+	await expect(page.getByRole('button', { name: 'Recorded' })).toBeVisible();
+
+	// The branch is rewritten: the recorded head is still reachable, but it is
+	// no longer an ancestor of the new one.
+	stub.push(6, sha(109));
+	await expireMutable(page);
+	await openPull(page, 6);
+
+	const warned = page.getByRole('status').filter({ hasText: 'Force pushed' });
+	await expect(warned).toBeVisible();
+	await expect(warned).toContainText(STALE_HEAD.slice(0, 7));
+	// It says the diff below is wider than the heading promises, rather than
+	// quietly showing the whole pull request under it.
+	await expect(warned).toContainText('includes work you have already read');
+
+	await expect(page.getByRole('complementary', { name: 'Context' })).toContainText('Force pushed');
+
+	// One request answered both questions. There is no second query to detect it.
+	expect(stub.compares[`${STALE_HEAD}...${sha(109)}`]).toBe(1);
+});
+
+test('threads are anchored to their lines, and the moved one still says where it was', async ({
+	page
+}) => {
+	await signIn(page);
+	await openPull(page);
+
+	// Three threads, in the order the code is in rather than the order the
+	// conversation happened in: by file, then down the file. So the thread
+	// written first is listed last, because line 9 comes after line 3.
+	const rows = threadList(page).getByRole('button');
+	await expect(rows).toHaveCount(3);
+	await expect(page.getByText('2 unresolved of 3')).toBeVisible();
+	await expect(rows.nth(0)).toContainText('App.svelte');
+	await expect(rows.nth(1)).toContainText('compiler.js');
+	await expect(rows.nth(2)).toContainText('compiler.js');
+
+	// The line a thread hangs off carries a marker with the comment count.
+	await expect(page.getByRole('button', { name: '2', exact: true }).first()).toBeVisible();
+
+	// A resolved thread reads as settled.
+	await rows.nth(1).click();
+	await expect(page.getByRole('article')).toContainText('Resolved');
+	await expect(page.getByRole('article')).toContainText('Fixed.');
+
+	// The thread that lost its line is still listed, its number struck through
+	// rather than dropped. PLAN.md Phase 7's "watch for": the commit it was
+	// written against is what places it, and the screen says which one.
+	await rows.nth(2).click();
+	const card = page.getByRole('article');
+	await expect(card).toContainText('Was this ever measured?');
+	await expect(card).toContainText('Unresolved');
+	await expect(card).toContainText(`Moved · ${sha(101).slice(0, 7)}`);
+});
+
+test('j and k walk the threads and esc closes the pane', async ({ page }) => {
+	await signIn(page);
+	await openPull(page);
+
+	await page.keyboard.press('j');
+	await expect(page.getByRole('article')).toContainText('This import is doing');
+	// Comment bodies are Markdown, parsed by us and never injected as HTML.
+	await expect(page.getByRole('article').locator('strong')).toHaveText('two');
+	// A thread with replies shows them, separated as DESIGN.md §5 asks.
+	await expect(page.getByRole('article')).toContainText('Split in the next push.');
+
+	await page.keyboard.press('j');
+	await expect(page.getByRole('article')).toContainText('Fixed.');
+	await page.keyboard.press('k');
+	await expect(page.getByRole('article')).toContainText('This import is doing');
+
+	await page.keyboard.press('Escape');
+	await expect(page.getByRole('article')).toHaveCount(0);
+});
+
+test('marking a file viewed collapses it, and marking the last one records the review', async ({
+	page
+}) => {
+	await signIn(page);
+	await openPull(page);
+
+	// Two files, both open. The patch's own lines are on screen.
+	await expect(page.getByText("import { tidy } from './tidy.js';")).toHaveCount(2);
+
+	const marks = page.getByRole('button', { name: 'Mark viewed', exact: true });
+	const seen = page.getByRole('button', { name: 'Viewed', exact: true });
+
+	await expect(marks).toHaveCount(2);
+	await marks.first().click();
+
+	// Collapsed: the header stays, the body goes. That is what keeps the
+	// virtualised list one row height throughout.
+	await expect(seen).toHaveCount(1);
+	await expect(page.getByText("import { tidy } from './tidy.js';")).toHaveCount(1);
+
+	await marks.click();
+	await expect(page.getByText("import { tidy } from './tidy.js';")).toHaveCount(0);
+
+	// Every file read is a review finished, and the screen offers to record it.
+	await expect(page.getByText('Every file here is viewed.')).toBeVisible();
+	await page.getByRole('button', { name: 'Record this as reviewed' }).click();
+	await expect(page.getByRole('complementary', { name: 'Context' })).toContainText('Reviewed at');
+
+	// The marks survive a reload, because they are in IndexedDB and not in memory.
+	await page.reload();
+	await expect(seen).toHaveCount(2);
+});
+
+test('a marked file stays viewed across a push that did not touch it', async ({ page }) => {
+	const stub = await signIn(page);
+	await openPull(page);
+
+	const marks = page.getByRole('button', { name: 'Mark viewed', exact: true });
+	const seen = page.getByRole('button', { name: 'Viewed', exact: true });
+
+	// Read both files, and say so.
+	await marks.first().click();
+	await marks.click();
+	await page.getByRole('button', { name: 'Record this as reviewed' }).click();
+	await expect(page.getByRole('complementary', { name: 'Context' })).toContainText('Reviewed at');
+
+	// A push lands, and it touched `src/compiler.js` only. The mark on that file
+	// is spent; the one on `src/App.svelte` survives, which is what keeps a push
+	// from restarting a review somebody has already done.
+	stub.push(7, sha(108));
+	await expireMutable(page);
+	await openPull(page);
+
+	await expect(
+		page.getByRole('status').filter({ hasText: 'Since your last review' })
+	).toBeVisible();
+	await expect(marks).toHaveCount(1);
+	await expect(seen).toHaveCount(0);
+
+	// And the surviving mark is still on record — the whole diff shows it.
+	await page.getByRole('link', { name: 'Whole diff', exact: true }).click();
+	await expect(seen).toHaveCount(1);
+	await expect(marks).toHaveCount(1);
+});
+
+test('a large diff is paged, and the page it walked is never fetched twice', async ({ page }) => {
+	const stub = await signIn(page);
+	await openPull(page, 4);
+
+	// The first page is a hundred files, and the screen says what it is not
+	// showing rather than ending silently.
+	await expect(page.getByText('src/typed-000.ts').first()).toBeVisible();
+	await expect(page.getByRole('button', { name: /Load more files/ })).toContainText('50 left');
+	expect(stub.pullFiles['4:1']).toBe(1);
+	expect(stub.pullFiles['4:2'] ?? 0).toBe(0);
+
+	await page.getByRole('button', { name: /Load more files/ }).click();
+	await expect.poll(() => stub.pullFiles['4:2'] ?? 0).toBe(1);
+	// The walk is finished, so there is nothing left to offer.
+	await expect(page.getByRole('button', { name: /Load more/ })).toHaveCount(0);
+
+	// A pull request's diff is a function of two commits, so it is filed
+	// permanently. Leaving and walking the whole thing again costs nothing.
+	await page.goto(PULLS_URL);
+	await expireMutable(page);
+	await openPull(page, 4);
+	await expect(page.getByText('src/typed-000.ts').first()).toBeVisible();
+	await page.getByRole('button', { name: /Load more files/ }).click();
+	await expect(page.getByRole('button', { name: /Load more/ })).toHaveCount(0);
+
+	expect(stub.pullFiles['4:1']).toBe(1);
+	expect(stub.pullFiles['4:2']).toBe(1);
+});
+
+test('hovering a row warms the review it opens', async ({ page }) => {
+	const stub = await signIn(page);
+	await openPulls(page);
+
+	await pullList(page)
+		.getByRole('link', { name: /Rewrite the parser/ })
+		.hover();
+	await expect.poll(() => stub.pull['7'] ?? 0).toBe(1);
+
+	await pullList(page)
+		.getByRole('link', { name: /Rewrite the parser/ })
+		.click();
+	await expect(page.getByRole('heading', { level: 1 })).toContainText('Rewrite the parser');
+
+	// The screen it opened asked for nothing it did not already hold.
+	expect(stub.pull['7']).toBe(1);
 });

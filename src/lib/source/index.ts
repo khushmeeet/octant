@@ -15,6 +15,8 @@ export {
 	comparisonTruncated,
 	COMPARE_FILE_CAP,
 	COMMIT_FILE_CAP,
+	PULL_FILES_CAP,
+	PULL_FILES_PAGE,
 	type RestOptions,
 	type RestResult,
 	type Comparison,
@@ -47,6 +49,35 @@ export {
 	type RefsPage
 } from './refs';
 export { getCompare, type CompareCommitInfo, type CompareResult } from './compare';
+export {
+	getPulls,
+	pullAuthor,
+	PULLS,
+	PULLS_PAGE_SIZE,
+	type PullEntry,
+	type PullFilter,
+	type PullsPage,
+	type PullState,
+	type ReviewDecision
+} from './pulls';
+export {
+	approvals,
+	changesRequested,
+	getPull,
+	unresolved,
+	PULL,
+	COMMENT_PAGE_SIZE,
+	THREAD_PAGE_SIZE,
+	type MergeableState,
+	type PullDetail,
+	type Review,
+	type ReviewComment,
+	type ReviewState,
+	type ReviewThread,
+	type ThreadSide
+} from './pull';
+export { getPullFiles, pullFilesTruncated, type PullFilesPage } from './pull-files';
+export { NO_CHECKS, type CheckRun, type CheckState, type CheckSummary } from './checks';
 export { commitOid, type RevisionNode } from './revision';
 export {
 	fromQuery,
@@ -56,4 +87,4 @@ export {
 	type Fetched,
 	type PageOf
 } from './query';
-export { GitHubSource, type Source } from './source';
+export { GitHubSource, type PullDiffAt, type Source } from './source';

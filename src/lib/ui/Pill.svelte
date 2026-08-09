@@ -6,7 +6,14 @@
 	 * Tones map to the one meaning each colour is allowed to carry.
 	 */
 	interface Props {
-		tone?: 'default' | 'accent' | 'ok' | 'no' | 'plain';
+		/**
+		 * `warn` is amber, and DESIGN.md §3 spends amber on exactly two things: a
+		 * force push you have not seen, and an unresolved thread. Phase 7 is the
+		 * first screen with either, which is why the tone arrives with it rather
+		 * than in Phase 0 — a colour with no meaning in use is a colour that
+		 * drifts into decoration.
+		 */
+		tone?: 'default' | 'accent' | 'ok' | 'no' | 'warn' | 'plain';
 		mono?: boolean;
 		title?: string;
 		onclick?: () => void;
@@ -64,6 +71,11 @@
 		background: var(--no-bg);
 		border-color: transparent;
 		color: var(--no);
+	}
+
+	.warn {
+		border-color: var(--wn);
+		color: var(--wn);
 	}
 
 	.plain {
