@@ -38,6 +38,14 @@
 	--cm: #5c6067;
 	--fn: #77a9f2;
 
+	/* Graph lanes, coloured by column. Deliberately not `--ok`/`--no`: those
+	   two already mean added and removed on the same row as the delta bar. */
+	--lane-0: #6b7bdf;
+	--lane-1: #3fb6c8;
+	--lane-2: #a78bfa;
+	--lane-3: #d9a441;
+	--lane-4: #e06c9f;
+
 	--shadow-overlay: 0 16px 48px rgba(0, 0, 0, 0.45);
 }
 
@@ -71,6 +79,12 @@
 	--cm: #9195a0;
 	--fn: #2f6fd0;
 
+	--lane-0: #4f58b8;
+	--lane-1: #1f8ea1;
+	--lane-2: #7c4ddb;
+	--lane-3: #a9761a;
+	--lane-4: #c04f83;
+
 	--shadow-overlay: 0 16px 48px rgba(0, 0, 0, 0.18);
 }
 
@@ -90,7 +104,9 @@
 	/* A diff carries two of them — old and new — so each is narrower than the
 	   single gutter a file gets, and the pair still costs less than 2×46px. */
 	--gutter-diff: 40px;
-	--col-graph: 46px;
+	/* Five lanes at an 11px pitch, plus the dot's radius either side. Kept in
+	   step with `LANE_GAP`, `LANE_X0` and `MAX_LANES` in `log/graph.ts`. */
+	--col-graph: 58px;
 	--radius-pill: 5px;
 	--radius-item: 5px;
 	--radius-card: 8px;

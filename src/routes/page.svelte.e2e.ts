@@ -2337,39 +2337,105 @@ test('the log screen carries its commits, its counts and its panel', async ({ pa
 	await expect(sidebar.getByRole('link', { name: /Log/ })).toBeVisible();
 });
 
+/**
+ * What one row of the graph column is drawing: the lane its dot sits in, and
+ * how many of each kind of edge leave, arrive or run past it.
+ */
+async function lanes(page: Page, index: number) {
+	const svg = commitLog(page).getByRole('link').nth(index).locator('svg.graph');
+	await expect(svg).toBeVisible();
+	const count = async (kind: string) => await svg.locator(`path.${kind}`).count();
+	return {
+		lane: await svg.getAttribute('data-lane'),
+		up: (await count('up')) === 1,
+		down: (await count('down')) === 1,
+		joins: await count('join'),
+		forks: await count('fork'),
+		through: await count('through')
+	};
+}
+
 test('the graph opens a lane for a merge and closes it where it rejoins', async ({ page }) => {
 	await signIn(page);
 	await openLog(page);
 
-	// 109 merges 108 and 105, so a second lane opens on the first row...
-	const rows = commitLog(page).getByRole('link');
-	await expect(rows.nth(0).locator('.graph')).toHaveText('●╮');
+	// 109 merges 108 and 105, so a second lane forks off the first row. Nothing
+	// runs into the dot: it is the tip of what is loaded.
+	expect(await lanes(page, 0)).toEqual({
+		lane: '0',
+		up: false,
+		down: true,
+		joins: 0,
+		forks: 1,
+		through: 0
+	});
 
-	// ...carries down beside the spine while 105 is reached...
-	await expect(rows.nth(4).locator('.graph')).toHaveText('│●');
+	// The forked lane carries down beside the spine...
+	expect(await lanes(page, 1)).toMatchObject({ lane: '0', through: 1, joins: 0, forks: 0 });
 
-	// ...and closes into 104, which is the parent both sides share. 104 is a
-	// merge in its own right, so the column 105 gave back is the column 100
-	// takes: a branch arrives from above and another leaves below, in one cell,
-	// and `┤` is the character that says both. Drawn as a plain close it would
-	// claim the lane ends here, and the four rows of `│` under it would be
-	// running from nothing.
-	await expect(rows.nth(5).locator('.graph')).toHaveText('●┤');
+	// ...until 105 is reached, which is in it rather than on the spine.
+	expect(await lanes(page, 4)).toMatchObject({ lane: '1', up: true, down: true, through: 1 });
 
-	// The reopened lane is a lane like any other: it carries down...
-	await expect(rows.nth(6).locator('.graph')).toHaveText('●│');
-	await expect(rows.nth(8).locator('.graph')).toHaveText('●│');
+	// 104 is where it rejoins, and 104 is a merge in its own right — so the
+	// column 105 gives back is the column 100 takes. One row carries both edges:
+	// a branch arriving from above and a different branch leaving below. Drawn
+	// as a join alone the four rows of lane under it would run from nothing.
+	expect(await lanes(page, 5)).toEqual({
+		lane: '0',
+		up: true,
+		down: true,
+		joins: 1,
+		forks: 1,
+		through: 0
+	});
+
+	// The reopened lane is a lane like any other: it runs past...
+	expect(await lanes(page, 6)).toMatchObject({ lane: '0', through: 1 });
+	expect(await lanes(page, 8)).toMatchObject({ lane: '0', through: 1 });
 
 	// ...reaches 100...
-	await expect(rows.nth(9).locator('.graph')).toHaveText('│●');
+	expect(await lanes(page, 9)).toMatchObject({ lane: '1', up: true, down: true, through: 1 });
 
-	// ...and closes into 98, which both sides share — 99 is only the row before
-	// it, still on the spine with the other lane running past.
-	await expect(rows.nth(10).locator('.graph')).toHaveText('●│');
-	await expect(rows.nth(11).locator('.graph')).toHaveText('●╯');
+	// ...and joins the spine at 98, which both sides share. 99 is only the row
+	// before it, still on the spine with the other lane running past.
+	expect(await lanes(page, 10)).toMatchObject({ lane: '0', through: 1, joins: 0 });
+	expect(await lanes(page, 11)).toMatchObject({ lane: '0', joins: 1, forks: 0, through: 0 });
 
 	// Below the join there is one lane and it stays one lane.
-	await expect(rows.nth(12).locator('.graph')).toHaveText('●');
+	expect(await lanes(page, 12)).toEqual({
+		lane: '0',
+		up: true,
+		down: true,
+		joins: 0,
+		forks: 0,
+		through: 0
+	});
+});
+
+test('the lanes meet across rows — the column is one drawing, not a glyph per cell', async ({
+	page
+}) => {
+	await signIn(page);
+	await openLog(page);
+
+	// This is the whole reason the column stopped being box-drawing characters.
+	// A glyph is ink inside a 12px line box dropped into a 32px row, so a lane
+	// running through ten commits came out as ten dashes with gaps. Every edge
+	// is drawn against the row's real height now, so where one row's lane leaves
+	// the bottom is exactly where the next one's enters the top.
+	const rows = commitLog(page).getByRole('link');
+	const first = await rows.nth(1).locator('svg.graph').boundingBox();
+	const second = await rows.nth(2).locator('svg.graph').boundingBox();
+	expect(first).not.toBeNull();
+	expect(second).not.toBeNull();
+	expect(first!.height).toBe(32);
+	expect(first!.y + first!.height).toBeCloseTo(second!.y, 1);
+
+	// A lane that runs past a commit spans the row top to bottom, and the two
+	// halves of a lane the commit sits in meet at the dot.
+	await expect(rows.nth(1).locator('path.through')).toHaveAttribute('d', 'M18,0 V32');
+	await expect(rows.nth(1).locator('path.up')).toHaveAttribute('d', 'M7,0 V16');
+	await expect(rows.nth(1).locator('path.down')).toHaveAttribute('d', 'M7,16 V32');
 });
 
 test('j and k move a selection that starts unset, and the pane fills in two beats', async ({
@@ -2492,9 +2558,22 @@ test('the log scopes to a path, and the total follows the scope', async ({ page 
 
 	// Filtering by path drops the commits in between, so the history is a list
 	// rather than a graph — and it draws itself as one instead of leaking lanes.
+	// One column, one dot a row, and never a fork or a join.
 	for (const row of await commitLog(page).getByRole('link').all()) {
-		await expect(row.locator('.graph')).toHaveText('●');
+		await expect(row.locator('svg.graph')).toHaveAttribute('data-lane', '0');
+		await expect(row.locator('svg.graph circle.dot')).toHaveCount(1);
+		await expect(row.locator('svg.graph path.fork')).toHaveCount(0);
+		await expect(row.locator('svg.graph path.join')).toHaveCount(0);
+		await expect(row.locator('svg.graph path.through')).toHaveCount(0);
 	}
+
+	// Where two of the four *are* parent and child — 106's parent is 104, and
+	// the filter kept both — the spine is joined up between them and nowhere
+	// else. The character column could not draw this at all: a lane the commit
+	// itself sits in had no glyph but the dot, so a real edge went missing.
+	expect(await lanes(page, 1)).toMatchObject({ up: false, down: true });
+	expect(await lanes(page, 2)).toMatchObject({ up: true, down: false });
+	expect(await lanes(page, 3)).toMatchObject({ up: false, down: false });
 
 	// The scope was opened once, and the verb's hover is what paid for it.
 	expect(stub.logs['src/compiler.js']).toBe(1);

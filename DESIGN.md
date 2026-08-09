@@ -122,7 +122,7 @@ Restrained by design — these sit _under_ the chrome, never above it.
 | Right panel padding       | 14px               |
 | Line-number gutter        | 46px               |
 | Blame gutter              | 126px              |
-| Graph column              | 46px               |
+| Graph column              | 58px               |
 | Pill radius / padding     | 5px / 2.5px 8px    |
 | Nav + tree item radius    | 5px                |
 | Thread card radius        | 8px                |
@@ -185,7 +185,16 @@ red for removed, `--bd2` for unused. The only graphic in the app; it earns
 its place because scanning a hundred rows for "is this a big change" is a
 real task.
 
-**Graph column** — box-drawing characters in mono at a fixed 46px width.
+**Graph column** — drawn, not typed. One inline SVG per row at a fixed 58px
+width: five lanes at an 11px pitch, 1.5px strokes with round caps, a 3.5px
+dot, and cubic curves whose control points sit at the quarter heights so a
+branch leaves and rejoins vertically rather than as a diagonal. Lanes are
+coloured by column (`--lane-0` upwards), deliberately avoiding the delta
+bar's green and red. This was box-drawing characters in mono for five
+phases and they could not do it: a glyph is ink inside a 12px line box in a
+32px row, so a lane crossing ten commits was ten dashes with gaps and a
+curve stopped at the edge of its own cell. Each row's SVG is the row's full
+height, so lanes meet where the rows do.
 
 **Palette** — centred overlay, `min(540px, 90%)`, 10px radius, shadow
 `0 16px 48px rgba(0,0,0,.45)`, scrim at 50% black. Query row, grouped
