@@ -4,12 +4,15 @@
 	import TokenGate from '$lib/auth/TokenGate.svelte';
 	import { session } from '$lib/auth/token.svelte';
 	import { startTick } from '$lib/sync/tick';
+	import { panel } from '$lib/ui/panel.svelte';
 	import { theme } from '$lib/ui/theme.svelte';
 
 	let { children } = $props();
 
-	// Client-only (`ssr = false`), so `document` is available at init.
+	// Client-only (`ssr = false`), so `document` and `localStorage` are
+	// available at init.
 	theme.init();
+	panel.init();
 	void session.restore();
 
 	/**

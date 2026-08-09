@@ -2,24 +2,67 @@
 	import type { Snippet } from 'svelte';
 	import Icon from './Icon.svelte';
 	import Pill from './Pill.svelte';
-	import RateMeter from './RateMeter.svelte';
+	import { panel } from './panel.svelte';
 	import { theme } from './theme.svelte';
-	import type { Crumb } from './types';
+	import type { Crumb, Verb } from './types';
 
 	/**
-	 * Breadcrumb left, pills right — DESIGN.md §5.
+	 * Breadcrumb left, the object's pills and verbs right — DESIGN.md §5.
 	 *
-	 * A screen supplies its own pills (ref, HEAD SHA, state); the meter, the
-	 * palette and the theme toggle are the chrome's and always sit outermost, so
-	 * their position never depends on which screen you are on.
+	 * Verbs used to sit in a row of their own under this one. They did not earn
+	 * the 32px: the row repeated the object's name, which the breadcrumb already
+	 * says, and pushed every screen's content a line further down. So the verbs
+	 * moved up here, next to the pills that identify the thing they act on, and
+	 * the app got a row back.
+	 *
+	 * A screen supplies its own pills (ref, HEAD SHA, state) and its own verbs;
+	 * the palette, the theme toggle and the panel toggle are the chrome's and
+	 * always sit outermost, so their position never depends on which screen you
+	 * are on. Between the two, the object's group scrolls rather than pushing the
+	 * chrome off the end.
 	 */
 	interface Props {
 		crumbs?: Crumb[];
 		pills?: Snippet;
+		/** Every object carries its own verbs — ARCHITECTURE.md §2. */
+		verbs?: Verb[];
+		/** Which verb names the view you are already looking at, if any. */
+		active?: string;
+		/** Trailing utility verb, usually a copy action. */
+		utility?: Verb;
 	}
 
-	let { crumbs = [{ label: 'octant' }], pills }: Props = $props();
+	let { crumbs = [{ label: 'octant' }], pills, verbs = [], active, utility }: Props = $props();
 </script>
+
+{#snippet action(verb: Verb)}
+	{#if verb.href}
+		<a
+			class="verb"
+			class:on={active === verb.id}
+			href={verb.href}
+			title={verb.title}
+			target={verb.external ? '_blank' : undefined}
+			rel={verb.external ? 'noopener noreferrer external' : undefined}
+			onclick={verb.onselect}
+			onpointerenter={verb.onhover}
+			onfocus={verb.onhover}
+		>
+			{verb.label}
+		</a>
+	{:else}
+		<button
+			class="verb"
+			class:on={active === verb.id}
+			title={verb.title}
+			onclick={verb.onselect}
+			onpointerenter={verb.onhover}
+			onfocus={verb.onhover}
+		>
+			{verb.label}
+		</button>
+	{/if}
+{/snippet}
 
 <header class="hd">
 	<div class="bc">
@@ -37,9 +80,17 @@
 		{/each}
 	</div>
 
-	<div class="r">
+	<div class="obj">
 		{#if pills}{@render pills()}{/if}
-		<RateMeter />
+		{#each verbs as verb (verb.id)}
+			{@render action(verb)}
+		{/each}
+		{#if utility}
+			{@render action(utility)}
+		{/if}
+	</div>
+
+	<div class="r">
 		<Pill title="Command palette — arrives in Phase 9">
 			<Icon name="search" />⌘K
 		</Pill>
@@ -49,6 +100,17 @@
 		>
 			{theme.current === 'dark' ? 'Light' : 'Dark'}
 		</Pill>
+		<!-- The panel is context, not content. Wanting the width back for a diff
+		     is a reasonable thing to want. -->
+		<button
+			class="tog"
+			class:on={panel.open}
+			aria-pressed={panel.open}
+			title={panel.open ? 'Hide the context panel' : 'Show the context panel'}
+			onclick={() => panel.toggle()}
+		>
+			<Icon name="panel" label={panel.open ? 'Hide the context panel' : 'Show the context panel'} />
+		</button>
 	</div>
 </header>
 
@@ -88,11 +150,79 @@
 		color: var(--tx);
 	}
 
-	.r {
+	/* The object's own group: what it is, then what you can do to it. It takes
+	   the slack and scrolls when a screen carries more verbs than fit, so the
+	   chrome to its right never moves. */
+	.obj {
 		margin-left: auto;
 		display: flex;
 		align-items: center;
 		gap: 6px;
+		min-width: 0;
+		overflow-x: auto;
+		overflow-y: hidden;
+		scrollbar-width: none;
+		padding: 4px 0;
+	}
+
+	.obj::-webkit-scrollbar {
+		display: none;
+	}
+
+	.r {
+		display: flex;
+		align-items: center;
+		gap: 6px;
 		flex: none;
+	}
+
+	.verb {
+		font-size: 12px;
+		color: var(--tx2);
+		padding: 2.5px 8px;
+		border-radius: var(--radius-item);
+		white-space: nowrap;
+		flex: none;
+		transition:
+			color 120ms,
+			background-color 120ms;
+	}
+
+	.verb:hover {
+		background: var(--hover);
+		color: var(--tx);
+	}
+
+	.verb.on {
+		color: var(--tx);
+		background: var(--sel);
+	}
+
+	.tog {
+		display: inline-flex;
+		align-items: center;
+		padding: 4px;
+		border-radius: var(--radius-item);
+		color: var(--tx3);
+		flex: none;
+		transition:
+			color 120ms,
+			background-color 120ms;
+	}
+
+	.tog:hover {
+		color: var(--tx);
+		background: var(--hover);
+	}
+
+	.tog.on {
+		color: var(--tx2);
+	}
+
+	/* Below the panel's own breakpoint there is nothing to toggle. */
+	@media (max-width: 1060px) {
+		.tog {
+			display: none;
+		}
 	}
 </style>

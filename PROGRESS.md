@@ -1660,6 +1660,66 @@ a SHA that no ref names any more has to still be addressable.
 
 ---
 
+## Chrome pass — one row of it, and a panel you can put away
+
+**Done when:** the app is edge to edge, there is one row of chrome above the
+content rather than two, and the reader can spend the panel's 230px on the
+thing they came for. ✅
+
+### What changed
+
+| File | Change |
+|---|---|
+| `ui/Shell.svelte` | the verb region is gone; the frame is gone; the panel is conditional |
+| `ui/Header.svelte` | absorbs the verbs, loses the rate meter, gains the panel toggle |
+| `ui/panel.svelte.ts` | new — whether the right panel is on screen, persisted |
+| `ui/format.ts` | `mode()` — six octal digits read as `drwxr-xr-x` |
+| `ui/VerbRow.svelte`, `ui/RateMeter.svelte` | deleted |
+
+Every screen passes `verbs`, `active` and `utility` to `Header` where it passed
+them to `VerbRow`, and drops the `verbs` snippet from `Shell`.
+
+**The verb row was 32px of repetition.** It named the object on the left — a
+name the breadcrumb three pixels above it was already saying — and then pushed
+every screen's first row a line further down. The verbs themselves were never
+the problem, so they moved up beside the pills that identify the object they act
+on, which is where the reader was already looking. `ARCHITECTURE.md` §2 is
+unchanged in substance: every object still carries its own verbs, and they still
+have to resolve in 50ms.
+
+**Two verbs did not survive the move.** The Tree screen's `Files` and `Readme`
+scrolled the page to a section of itself. In a row of its own that was cheap; in
+the header it is chrome pretending to be navigation, next to verbs that go
+somewhere. Both sections are on the screen already.
+
+**The header's middle group scrolls; the chrome does not.** The Log screen with
+a commit selected carries three pills, six verbs and a utility, which is the
+worst case and fits at 1100px. Past that the object's group scrolls inside
+itself rather than pushing ⌘K, the theme toggle and the panel toggle off the
+end — their position is the thing that must not depend on the screen.
+
+**The rate meter is gone from the header, not from the app.** `4,819/5,000` is a
+real constraint and it is still accounted for — `sync/rate.svelte.ts` is what
+`prefetch()` and the background tick consult before spending anything — but it
+answered a question nobody was asking on the way to a file. The number is in the
+response, and the code that cares reads it there.
+
+**The panel is a preference, not a screen mode.** It persists in `localStorage`
+next to the theme and for the same reason: read it after paint and it flashes in
+before it collapses. Below 1060px the media query still hides it and the toggle
+hides with it — there is nothing to toggle.
+
+**The frame was costing 16px of both axes for a border.** It was a card in the
+preview, which is how previews present things; in the app it is a browser
+window, and the rows are worth more than the inset.
+
+**Mode is symbolic now.** `100644` is a storage format. The questions a listing
+is actually asked — is that a directory, is it executable, is it a symlink —
+are answered at a glance by `-rw-r--r--` and need decoding from the octal. The
+octal is still the truth underneath and is on the cell's title.
+
+---
+
 ## Carried forward
 
 Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.

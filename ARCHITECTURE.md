@@ -46,8 +46,8 @@ here; the specification — tokens, metrics, component inventory — lives in
 Four items: Tree, Log, Refs, Review. Branches and tags are the same object,
 so they share one screen.
 
-**Every object carries its own verbs.** A persistent strip below the header
-names the current object and exposes its actions inline — on a file:
+**Every object carries its own verbs.** The header exposes the current
+object's actions inline, beside the pills that identify it — on a file:
 View / Blame / Log / Raw / Permalink. Nothing lives behind a menu. This is
 the single largest retrieval win and it is only honest if every verb is
 instant.
@@ -250,7 +250,7 @@ src/lib/
   store/        Store interface, IdbStore, schema + migrations
   sync/         revalidation ticks, rate-limit accounting, prefetch
   visits/       last-seen records, ownership, delta computation
-  ui/           shell, sidebar, verb row, right panel, rows, code viewer
+  ui/           shell, sidebar, header + verbs, right panel, rows, code viewer
 src/routes/     one route per screen
 ```
 
@@ -263,7 +263,7 @@ These are the numbers the design is making promises about.
 | Interaction                      | Budget                                    |
 | -------------------------------- | ----------------------------------------- |
 | Cached screen render             | < 16ms to first paint                     |
-| Verb-row action                  | < 50ms, or it must not be in the verb row |
+| Verb action                      | < 50ms, or it must not be a verb          |
 | Cold screen (network)            | < 400ms p50                               |
 | Log virtualised at 4,000 commits | 60fps scroll                              |
 | Diff virtualised at 3,000 lines  | 60fps scroll                              |

@@ -112,11 +112,9 @@ Restrained by design — these sit _under_ the chrome, never above it.
 
 | Element                   | Value              |
 | ------------------------- | ------------------ |
-| App frame radius          | 10px               |
 | Left sidebar width        | 196px              |
 | Right panel width         | 230px              |
 | Header height             | 44px               |
-| Verb row height           | 32px               |
 | Column header height      | 28px               |
 | Data row height           | 32px               |
 | Horizontal padding (main) | 14px               |
@@ -137,21 +135,27 @@ rhythm and spacing, not by lines. Resist raising the contrast.
 
 ## 5. Component inventory
 
-**Shell** — sidebar, body (header → verb row → content), content splits into
-main and right panel.
+**Shell** — sidebar, body (header → content), content splits into main and
+right panel. It fills the viewport: no frame, no inset, no rounded corner. A
+repository browser is a dense list and the rows are worth more than the border.
 
 **Sidebar** — org badge (18px, 5px radius, accent fill) then four nav items:
 Tree, Log, Refs, Review, each with a count on the right. Below, a contextual
 section whose heading changes per screen (`Files`, `Symbols`, `Scope`,
 `Threads`).
 
-**Header** — breadcrumb left, pills right. Pills carry ref, HEAD SHA, and
-state (`Open`, `1 check failing`).
+**Header** — breadcrumb left; the object's group and then the chrome, right.
+The object's group is its pills (ref, HEAD SHA, state — `Open`, `1 check
+failing`) followed by its verbs as text buttons and the copy/utility verb
+last; it scrolls rather than pushing anything off the end. The chrome is ⌘K,
+the theme toggle and the panel toggle, always outermost so their position
+never depends on the screen.
 
-**Verb row** — sits under the header on every screen. Left: the object's
-name in tertiary text with a right divider. Then the verbs as text buttons.
-Right-aligned: the copy/utility verb. Every verb must resolve in under 50ms
-or it does not belong here.
+**Verbs** — every object carries its own, in the header beside the pills that
+identify it. Every verb must resolve in under 50ms or it does not belong
+there. They had a 32px row of their own until it was cut: it repeated the
+object's name from the breadcrumb and pushed every screen's content a line
+down for verbs that fit next to the pills.
 
 **Clone strip** — Tree screen only. Two labelled URLs, `read-only` and
 `read/write`, in mono at 11.5px.

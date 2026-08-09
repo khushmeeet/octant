@@ -21,10 +21,9 @@
 	import RightPanel from '$lib/ui/RightPanel.svelte';
 	import Shell from '$lib/ui/Shell.svelte';
 	import Sidebar from '$lib/ui/Sidebar.svelte';
-	import VerbRow from '$lib/ui/VerbRow.svelte';
 	import VirtualRows from '$lib/ui/VirtualRows.svelte';
 	import { copy } from '$lib/ui/clipboard';
-	import { ago, bytes, count, kilobytes } from '$lib/ui/format';
+	import { ago, bytes, count, kilobytes, mode } from '$lib/ui/format';
 	import type { Crumb, PanelEntry, Verb } from '$lib/ui/types';
 	import { sinceLastVisit } from '$lib/visits/since.svelte';
 
@@ -103,8 +102,6 @@
 	    opened should not claim one of its rows is special. */
 	let cursor = $state<number | null>(null);
 	let filterField = $state<HTMLInputElement | null>(null);
-	let listTop = $state<HTMLElement | null>(null);
-	let readmeTop = $state<HTMLElement | null>(null);
 
 	const parent = $derived(parentPath(path));
 
@@ -234,26 +231,22 @@
 		setTimeout(() => (copied = false), 1200);
 	}
 
+	/**
+	 * `Files` and `Readme` used to lead this list, scrolling the page to one of
+	 * its two sections. They went with the verb row: both sections are on the
+	 * screen you are already on, a scroll away, and a jump link to something
+	 * visible is chrome pretending to be navigation.
+	 */
 	const verbs = $derived.by<Verb[]>(() => {
 		const list: Verb[] = [
-			{ id: 'files', label: 'Files', onselect: () => listTop?.scrollIntoView({ block: 'start' }) }
+			{
+				id: 'archive',
+				label: 'Archive',
+				href: archiveUrl(repo, rev === 'HEAD' ? (summary.data?.defaultBranch ?? 'HEAD') : rev),
+				external: true,
+				title: 'Download this revision as a zip from github.com'
+			}
 		];
-
-		if (readmeEntry) {
-			list.push({
-				id: 'readme',
-				label: 'Readme',
-				onselect: () => readmeTop?.scrollIntoView({ block: 'start' })
-			});
-		}
-
-		list.push({
-			id: 'archive',
-			label: 'Archive',
-			href: archiveUrl(repo, rev === 'HEAD' ? (summary.data?.defaultBranch ?? 'HEAD') : rev),
-			external: true,
-			title: 'Download this revision as a zip from github.com'
-		});
 
 		if (permalink && !alreadyPermanent) {
 			list.push({
@@ -356,14 +349,10 @@
 {/snippet}
 
 {#snippet header()}
-	<Header {crumbs} {pills} />
-{/snippet}
-
-{#snippet verbRow()}
-	<VerbRow
-		object={path || `${repo.owner}/${repo.name}`}
+	<Header
+		{crumbs}
+		{pills}
 		{verbs}
-		active="files"
 		utility={{ id: 'copy', label: copied ? 'Copied' : 'Copy path', onselect: copyPath }}
 	/>
 {/snippet}
@@ -372,7 +361,7 @@
 	<RightPanel since={since.label} visit={since.rows} {about} open={openAgainst} />
 {/snippet}
 
-<Shell {sidebar} {header} verbs={verbRow} {panel}>
+<Shell {sidebar} {header} {panel}>
 	{#if summary.data && !path}
 		<CloneStrip https={summary.data.cloneUrl} ssh={summary.data.sshUrl} />
 	{/if}
@@ -389,7 +378,7 @@
 			</p>
 		{/if}
 
-		<div class="bar" bind:this={listTop}>
+		<div class="bar">
 			<input
 				bind:this={filterField}
 				bind:value={filter}
@@ -439,7 +428,7 @@
 						<div class="row sub" class:sel={index === active} title="Submodule">
 							<Icon name="commit" />
 							<span class="named"><span class="name mono">{item.entry.name}</span></span>
-							<span class="mode mono">{item.entry.mode}</span>
+							<span class="mode mono" title={item.entry.mode}>{mode(item.entry.mode)}</span>
 							<span class="size mono">submodule</span>
 						</div>
 					{:else}
@@ -466,7 +455,7 @@
 									<Dot title={mark.title} />
 								{/if}
 							</span>
-							<span class="mode mono">{item.entry.mode}</span>
+							<span class="mode mono" title={item.entry.mode}>{mode(item.entry.mode)}</span>
 							<span class="size mono">{bytes(item.entry.byteSize)}</span>
 						</a>
 					{/if}
@@ -487,7 +476,7 @@
 		</nav>
 
 		{#if readmeEntry}
-			<section class="readme" bind:this={readmeTop}>
+			<section class="readme">
 				<h2 class="mono">{readmeEntry.name}</h2>
 				{#if readme.data?.text !== null && readme.data?.text !== undefined}
 					{#if MARKDOWN.test(readmeEntry.name)}
@@ -574,8 +563,10 @@
 		padding-left: 22px;
 	}
 
+	/* Ten characters of symbolic mode, which is wider than six octal digits
+	   were and reads without being decoded first. */
 	.c-mode {
-		width: 72px;
+		width: 88px;
 		text-align: right;
 	}
 
@@ -650,7 +641,7 @@
 	}
 
 	.mode {
-		width: 72px;
+		width: 88px;
 	}
 
 	.size {

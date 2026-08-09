@@ -25,7 +25,6 @@
 	import RightPanel from '$lib/ui/RightPanel.svelte';
 	import Shell from '$lib/ui/Shell.svelte';
 	import Sidebar from '$lib/ui/Sidebar.svelte';
-	import VerbRow from '$lib/ui/VerbRow.svelte';
 	import { copy } from '$lib/ui/clipboard';
 	import { ago, bytes, count, kilobytes } from '$lib/ui/format';
 	import type { Crumb, PanelEntry, Verb } from '$lib/ui/types';
@@ -426,12 +425,9 @@
 {/snippet}
 
 {#snippet header()}
-	<Header {crumbs} {pills} />
-{/snippet}
-
-{#snippet verbRow()}
-	<VerbRow
-		object={path}
+	<Header
+		{crumbs}
+		{pills}
 		{verbs}
 		active={address.blame ? 'blame' : 'view'}
 		utility={{ id: 'copy', label: copied ? 'Copied' : 'Copy path', onselect: copyPath }}
@@ -442,7 +438,7 @@
 	<RightPanel since={since.label} {visit} {about} open={openAgainst} />
 {/snippet}
 
-<Shell {sidebar} {header} verbs={verbRow} {panel}>
+<Shell {sidebar} {header} {panel}>
 	{#if failure && !file.data}
 		<p class="fail" role="alert">
 			<b>{ERROR_LABEL[failure.kind]}</b>{failure.message}

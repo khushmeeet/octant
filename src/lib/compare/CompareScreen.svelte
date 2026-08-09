@@ -21,7 +21,6 @@
 	import RightPanel from '$lib/ui/RightPanel.svelte';
 	import Shell from '$lib/ui/Shell.svelte';
 	import Sidebar from '$lib/ui/Sidebar.svelte';
-	import VerbRow from '$lib/ui/VerbRow.svelte';
 	import VirtualRows from '$lib/ui/VirtualRows.svelte';
 	import { copy } from '$lib/ui/clipboard';
 	import { ago, count } from '$lib/ui/format';
@@ -211,12 +210,9 @@
 {/snippet}
 
 {#snippet header()}
-	<Header {crumbs} {pills} />
-{/snippet}
-
-{#snippet verbRow()}
-	<VerbRow
-		object={range}
+	<Header
+		{crumbs}
+		{pills}
 		{verbs}
 		utility={{
 			id: 'copy',
@@ -230,7 +226,7 @@
 	<RightPanel since={since.label} visit={since.rows} {about} open={openAgainst} />
 {/snippet}
 
-<Shell {sidebar} {header} verbs={verbRow} {panel}>
+<Shell {sidebar} {header} {panel}>
 	{#if failure && !data}
 		<p class="fail" role="alert">
 			<b>{ERROR_LABEL[failure.kind]}</b>{failure.message}

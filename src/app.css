@@ -76,11 +76,9 @@
 
 /* Layout metrics — DESIGN.md §4 */
 :root {
-	--frame-radius: 10px;
 	--sidebar-w: 196px;
 	--panel-w: 230px;
 	--header-h: 44px;
-	--verbs-h: 32px;
 	--colhd-h: 28px;
 	--row-h: 32px;
 	--pad-main: 14px;

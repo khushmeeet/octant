@@ -73,3 +73,37 @@ export function bytes(size: number | null): string {
 export function kilobytes(size: number | null): string {
 	return size === null ? '—' : bytes(size * 1024);
 }
+
+/**
+ * A tree entry's mode the way `ls -l` and `git ls-tree -l` readers already read
+ * it: `100644` is `-rw-r--r--`, `040000` is `drwxr-xr-x`.
+ *
+ * Six octal digits are the storage format, not a reading. The only questions a
+ * listing is actually asked of this column are "is that a directory, a symlink
+ * or a submodule" and "is it executable", and the symbolic form answers both at
+ * a glance where the number needs decoding first.
+ *
+ * Trees and symlinks carry no permission bits of their own — git stores them as
+ * 040000 and 120000 — so they take the conventional rendering every other tool
+ * shows for them rather than nine dashes.
+ */
+export function mode(octal: string): string {
+	const bits = Number.parseInt(octal, 8);
+	if (!Number.isFinite(bits)) return octal;
+
+	switch (bits & 0o170000) {
+		case 0o040000:
+			return 'drwxr-xr-x';
+		case 0o120000:
+			return 'lrwxrwxrwx';
+		// A gitlink is a commit pinned inside a tree, not a file here. `m` for
+		// module, and no permissions, because it has none in this repository.
+		case 0o160000:
+			return 'm---------';
+	}
+
+	const rwx = (triplet: number) =>
+		`${triplet & 4 ? 'r' : '-'}${triplet & 2 ? 'w' : '-'}${triplet & 1 ? 'x' : '-'}`;
+
+	return `-${rwx((bits >> 6) & 7)}${rwx((bits >> 3) & 7)}${rwx(bits & 7)}`;
+}
