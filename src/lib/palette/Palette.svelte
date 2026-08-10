@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Bar from './Bar.svelte';
-	import { isPaletteChord, palette, rememberPointer } from './palette.svelte';
+	import { isPaletteChord, palette, rememberPointer } from '$lib/ui/palette.svelte';
 
 	/**
 	 * The palette's mount point and its shortcut — PLAN.md Phase 9.
@@ -13,7 +13,8 @@
 	 * while the palette is open. So the app carries two listeners for this
 	 * feature when it is closed, and not a single read. The second one writes
 	 * down where the pointer is, which is what lets the overlay tell a mouse that
-	 * moved from a mouse that was merely already there — see `palette.svelte.ts`.
+	 * moved from a mouse that was merely already there — see `ui/palette.svelte.ts`,
+	 * which also explains why the state lives over there rather than in here.
 	 */
 	function onKeydown(event: KeyboardEvent): void {
 		if (!isPaletteChord(event)) return;

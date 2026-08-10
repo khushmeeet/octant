@@ -299,6 +299,7 @@ src/lib/
   auth/         token provider, validation, entry gate
   home/         the arrival screen: your repositories, and what needs you
   palette/      ⌘K: the grammar, the ranking, and the overlay
+                (its open/close state is chrome, and lives in ui/)
   source/       Source interface, GitHubSource, GraphQL documents
   store/        Store interface, IdbStore, schema + migrations
   sync/         revalidation ticks, rate-limit accounting, prefetch

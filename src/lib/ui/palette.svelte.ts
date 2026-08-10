@@ -6,6 +6,20 @@
  * header's own chrome button is the second caller. It is the same shape as
  * `panel` and `theme`, minus the persistence — a palette that reopened where
  * you left it would be showing you the answer to a question you already asked.
+ *
+ * **It lives here rather than in `palette/`, and that is not filing.** It sat
+ * beside its components as `palette/palette.svelte.ts` until the pairing with
+ * `palette/Palette.svelte` turned out to be unbuildable on a case-insensitive
+ * filesystem: `./palette.svelte` resolves to the *component* on macOS and
+ * Windows and to this module on Linux, so the app failed to boot on two
+ * platforms out of three while every check passed on the third. The rule that
+ * falls out of it — **no component may share a base name with a `.svelte.ts`
+ * module in the same directory** — is worth more than the convenience of them
+ * being neighbours.
+ *
+ * It belongs here on its own merits too. This is chrome state, the third of the
+ * trio `Header.svelte` reads: is the panel open, which theme, is the palette up.
+ * And it means `ui/` — the shell — no longer imports from a feature directory.
  */
 
 let open = $state(false);

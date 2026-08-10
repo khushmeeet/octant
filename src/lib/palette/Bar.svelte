@@ -6,7 +6,7 @@
 	import Icon from '$lib/ui/Icon.svelte';
 	import { count } from '$lib/ui/format';
 	import { GRAMMAR, parseQuery } from './grammar';
-	import { isPaletteChord, lastPointer, palette } from './palette.svelte';
+	import { isPaletteChord, lastPointer, palette } from '$lib/ui/palette.svelte';
 	import { segments } from './rank';
 	import { paletteResults } from './results.svelte';
 	import type { Result } from './types';

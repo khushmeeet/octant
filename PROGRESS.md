@@ -1937,7 +1937,7 @@ One overlay, on every screen, and the one read the app did not already have.
 | `palette/grammar.ts` | the prefix grammar, and what a typed line *addresses* |
 | `palette/rank.ts` | subsequence matching, scoring, and where the characters landed |
 | `palette/groups.ts` | a row earns its place once |
-| `palette/palette.svelte.ts` | whether it is open, and what counts as the chord |
+| `ui/palette.svelte.ts` | whether it is open, the chord, and where the pointer was |
 | `palette/types.ts` | `Result` and `Group` |
 | `source/paths.ts` | the path index — every path in a repository, in one request |
 
@@ -2004,6 +2004,19 @@ recent, repositories, screens, commands. It is the right panel's argument
 palette whose headings reorder has to be read, and one whose geography is fixed
 can be aimed at. A row that could appear in two groups appears in the first,
 which is the most specific one.
+
+**The open/close state lives in `ui/`, and it is not filing.** It sat with its
+components as `palette/palette.svelte.ts` until that pairing with
+`palette/Palette.svelte` turned out to be unbuildable on a case-insensitive
+filesystem: `./palette.svelte` resolves to the *component* on macOS and Windows
+and to the module on Linux, so the app failed to boot with
+`does not provide an export named 'isPaletteChord'` on two platforms out of
+three while `check`, `lint`, `build` and 102 e2e tests passed on the third. The
+rule it leaves behind — **no component may share a base name with a
+`.svelte.ts` module in the same directory** — is the kind a repository only
+learns once. It also belongs in `ui/` on the merits: this is chrome state, the
+third of the trio `Header.svelte` reads beside `panel` and `theme`, and moving
+it means the shell no longer imports from a feature directory.
 
 **Keys stop at the query row.** Every screen listens on the window for `j`, `k`,
 `enter` and `esc`, and the home screen opens its first row on `enter` even while

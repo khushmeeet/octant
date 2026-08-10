@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { palette } from '$lib/palette/palette.svelte';
+	import { palette } from './palette.svelte';
 	import Icon from './Icon.svelte';
 	import Pill from './Pill.svelte';
 	import { panel } from './panel.svelte';
