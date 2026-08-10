@@ -1579,9 +1579,27 @@ function listing(page: Page) {
 	return page.getByRole('navigation', { name: 'Directory listing' });
 }
 
-async function openRepo(page: Page, at = '/sveltejs/svelte') {
+/**
+ * The Tree screen, which is a screen about a directory and lives at
+ * `/tree/{rev}` at every depth including the root. The repository's own address
+ * is the Summary — `openSummary` below.
+ */
+async function openRepo(page: Page, at = '/sveltejs/svelte/tree/HEAD') {
 	await page.goto(at);
 	await expect(listing(page).getByRole('link', { name: 'README.md' })).toBeVisible();
+}
+
+/** The README, as its own region — the summary's description is not part of it. */
+function readme(page: Page) {
+	return page.getByRole('region', { name: 'README.md' });
+}
+
+/** The repository itself: what it is, what just landed, and its README. */
+async function openSummary(page: Page, at = '/sveltejs/svelte') {
+	await page.goto(at);
+	await expect(
+		page.getByRole('main').getByRole('heading', { name: 'svelte', exact: true })
+	).toBeVisible();
 }
 
 /** The home screen's two lists. Rows are links because they go somewhere. */
@@ -1790,12 +1808,14 @@ test('one address is not fetched twice while it is in the air', async ({ page })
 
 test('a second load paints from IndexedDB with no network call', async ({ page }) => {
 	const stub = await signIn(page);
-	await openRepo(page);
+	// The Summary reads all three of them — the repository, the root listing and
+	// the README's blob — which is what makes it the screen to prove the cache on.
+	await openSummary(page);
 
 	// The README rendering is the signal that its blob reached IndexedDB —
 	// `settle()` writes before it resolves, and the resolve is what sets `data`.
 	// Reloading before that would discard a request the next load then repeats.
-	await expect(page.getByRole('main').getByRole('heading', { name: 'svelte' })).toBeVisible();
+	await expect(readme(page).getByRole('heading', { name: 'svelte' })).toBeVisible();
 
 	const repoCalls = stub.calls.Repo;
 	const treeCalls = stub.calls.Tree;
@@ -1804,8 +1824,7 @@ test('a second load paints from IndexedDB with no network call', async ({ page }
 	// A new document, a new store instance, nothing in memory. Only IndexedDB
 	// survives, so anything that paints now came off disk.
 	await page.reload();
-	await expect(listing(page).getByRole('link', { name: 'README.md' })).toBeVisible();
-	await expect(page.getByRole('heading', { name: 'svelte', exact: true })).toBeVisible();
+	await expect(readme(page).getByRole('heading', { name: 'svelte', exact: true })).toBeVisible();
 
 	expect(stub.calls.Repo).toBe(repoCalls);
 	expect(stub.calls.Tree).toBe(treeCalls);
@@ -1833,7 +1852,7 @@ test('a listing addressed by SHA is never asked for twice', async ({ page }) => 
 
 test('a failed revalidation keeps the cached render on screen', async ({ page }) => {
 	const stub = await signIn(page);
-	await openRepo(page);
+	await openSummary(page);
 
 	// Past the freshness window, so coming back revalidates rather than reading
 	// straight through — and the revalidation is the thing that fails.
@@ -1844,8 +1863,7 @@ test('a failed revalidation keeps the cached render on screen', async ({ page })
 	await page.reload();
 
 	await expect(page.getByRole('status')).toContainText('Showing what was cached');
-	await expect(listing(page).getByRole('link', { name: 'README.md' })).toBeVisible();
-	await expect(page.getByRole('main').getByRole('heading', { name: 'svelte' })).toBeVisible();
+	await expect(readme(page).getByRole('heading', { name: 'svelte' })).toBeVisible();
 });
 
 test('a database written by an earlier phase is migrated in place', async ({ page }) => {
@@ -1945,8 +1963,8 @@ test('a full immutable store is evicted oldest-first', async ({ page }) => {
 
 	// The first write of the session triggers the pressure check. The README is
 	// blob-addressed, so it lands in the immutable store.
-	await openRepo(page);
-	await expect(page.getByRole('heading', { name: 'svelte', exact: true })).toBeVisible();
+	await openSummary(page);
+	await expect(readme(page).getByRole('heading', { name: 'svelte', exact: true })).toBeVisible();
 
 	const survivors = await page.evaluate(async () => {
 		const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -1976,7 +1994,9 @@ test('a full immutable store is evicted oldest-first', async ({ page }) => {
 
 /* --------------------------------------------------- Phase 3: the screen -- */
 
-test('the tree screen carries the repository, its clone URLs and its README', async ({ page }) => {
+test('the tree screen carries the directory, and nothing that is not about it', async ({
+	page
+}) => {
 	await signIn(page);
 	await openRepo(page);
 
@@ -1984,14 +2004,6 @@ test('the tree screen carries the repository, its clone URLs and its README', as
 	await expect(page.getByRole('banner').getByText('sveltejs')).toBeVisible();
 	await expect(page.getByRole('banner').getByText('main', { exact: true })).toBeVisible();
 	await expect(page.getByRole('banner').getByText('0f1a2b3')).toBeVisible();
-
-	// Clone strip: two URLs, labelled by what they let you do.
-	await expect(page.getByLabel('Copy the read-only clone URL')).toContainText(
-		'https://github.com/sveltejs/svelte.git'
-	);
-	await expect(page.getByLabel('Copy the read/write clone URL')).toContainText(
-		'git@github.com:sveltejs/svelte.git'
-	);
 
 	// The right panel keeps its three blocks, in order, whatever is in them.
 	const panel = page.getByRole('complementary', { name: 'Context' });
@@ -2005,6 +2017,70 @@ test('the tree screen carries the repository, its clone URLs and its README', as
 	await expect(sidebar.getByText('12,345')).toBeVisible();
 	await expect(sidebar.getByText('942')).toBeVisible();
 	await expect(sidebar.getByText('7', { exact: true })).toBeVisible();
+
+	// Three things that were here and are about the repository rather than about
+	// this directory: they belong to the Summary now, and the sidebar's second
+	// copy of the tree belongs nowhere.
+	await expect(page.getByLabel('Copy the read-only clone URL')).toHaveCount(0);
+	await expect(
+		page.getByRole('main').getByRole('heading', { name: 'svelte', exact: true })
+	).toHaveCount(0);
+	await expect(sidebar.getByRole('button', { name: /^Expand/ })).toHaveCount(0);
+});
+
+test('a repository opens on what it is, not on one of its directories', async ({ page }) => {
+	const stub = await signIn(page);
+	await openSummary(page);
+
+	// The breadcrumb names the repository and stops there — there is no path.
+	await expect(page.getByRole('banner').getByText('sveltejs')).toBeVisible();
+	await expect(page.getByRole('banner').getByText('main', { exact: true })).toBeVisible();
+
+	// What it is, and what just landed: the head commit, readable, with its SHA
+	// opening the commit rather than sitting in a pill.
+	const main = page.getByRole('main');
+	await expect(main).toContainText('web development for the rest of us');
+	await expect(main).toContainText('stop the compiler eating its own tail');
+	await expect(main.getByRole('link', { name: '0f1a2b3' })).toHaveAttribute(
+		'href',
+		`/sveltejs/svelte/commit/${HEAD}`
+	);
+
+	// The clone strip is about the repository, so this is where it lives now.
+	await expect(page.getByLabel('Copy the read-only clone URL')).toContainText(
+		'https://github.com/sveltejs/svelte.git'
+	);
+
+	// And no listing: the tree is the screen next door.
+	await expect(listing(page)).toHaveCount(0);
+
+	// Two reads, and the second is the one the tree screen renders from — so
+	// walking next door is a local read.
+	expect(stub.calls.Repo).toBe(1);
+	expect(stub.trees['']).toBe(1);
+
+	const sidebar = page.getByRole('navigation', { name: 'Primary' });
+	await sidebar.getByRole('link', { name: /^Tree/ }).click();
+	await expect(page).toHaveURL('/sveltejs/svelte/tree/HEAD');
+	await expect(listing(page).getByRole('link', { name: 'README.md' })).toBeVisible();
+	expect(stub.trees['']).toBe(1);
+});
+
+test('the badge is the way back to the repository, and says when you are there', async ({
+	page
+}) => {
+	await signIn(page);
+	await openRepo(page);
+
+	const sidebar = page.getByRole('navigation', { name: 'Primary' });
+	const badge = sidebar.getByRole('link', { name: 'sveltejs/svelte' });
+
+	// On the tree, the badge is a link out of it and is not current.
+	await expect(badge).not.toHaveAttribute('aria-current', 'page');
+
+	await badge.click();
+	await expect(page).toHaveURL('/sveltejs/svelte');
+	await expect(badge).toHaveAttribute('aria-current', 'page');
 });
 
 test('the verbs live in the header now, beside the pills they act on', async ({ page }) => {
@@ -2043,7 +2119,7 @@ test('the context panel collapses, and stays collapsed across a reload', async (
 
 	// It is a preference, not a per-screen mode: it survives a navigation and a
 	// reload, which is the whole reason it is written down.
-	await page.getByRole('link', { name: 'src', exact: true }).first().click();
+	await listing(page).getByRole('link', { name: 'src' }).click();
 	await expect(context(page)).toHaveCount(0);
 
 	await page.reload();
@@ -2056,9 +2132,9 @@ test('the context panel collapses, and stays collapsed across a reload', async (
 
 test('the README renders as markdown, and its raw HTML does not survive', async ({ page }) => {
 	await signIn(page);
-	await openRepo(page);
+	await openSummary(page);
 
-	const main = page.getByRole('main');
+	const main = readme(page);
 	await expect(main.getByRole('heading', { name: 'svelte', exact: true })).toBeVisible();
 	await expect(main.getByText('rest of us')).toBeVisible();
 	await expect(main.getByText('bun install')).toBeVisible();
@@ -2070,6 +2146,10 @@ test('the README renders as markdown, and its raw HTML does not survive', async 
 
 	// The centred logo is decoration, and DESIGN.md §8 does not want it.
 	await expect(main.getByText('a centred logo')).toHaveCount(0);
+
+	// Full width here, where the README is the screen rather than a note under a
+	// listing — the 76-character measure is for prose beside something else.
+	await expect(main.locator('.md')).toHaveClass(/wide/);
 });
 
 test('j and k move the selection and enter opens the row', async ({ page }) => {
@@ -2092,13 +2172,13 @@ test('j and k move the selection and enter opens the row', async ({ page }) => {
 	await expect(listing(page).getByRole('link', { name: 'compiler.js' })).toBeVisible();
 
 	// A subdirectory offers the way back out as a row, so the keyboard reaches
-	// it. It lands on the repository's canonical front page, because the default
-	// branch is addressed by omission rather than by name.
+	// it. It lands on the tree's own root — `/tree/HEAD`, not the repository's
+	// front page, which is the Summary and is a different screen.
 	await expect(listing(page).getByRole('link', { name: '..' })).toBeVisible();
 	await expect(listing(page).locator('[aria-current]')).toHaveCount(0);
 	await page.keyboard.press('j');
 	await page.keyboard.press('Enter');
-	await expect(page).toHaveURL('/sveltejs/svelte');
+	await expect(page).toHaveURL('/sveltejs/svelte/tree/HEAD');
 });
 
 test('slash focuses the filter and filtering narrows the listing', async ({ page }) => {
@@ -2151,21 +2231,23 @@ test('hovering a directory warms it, so opening it costs nothing', async ({ page
 	expect(stub.trees.src).toBe(1);
 });
 
-test('the sidebar tree expands, and shares the listing it already paid for', async ({ page }) => {
+test('the sidebar carries no second copy of the tree, on either screen', async ({ page }) => {
 	const stub = await signIn(page);
 	await openRepo(page);
 
+	// The listing is one read, not two: the sidebar used to render the root tree
+	// beside it, and ⌘K — which indexes every path in the repository — is what
+	// made 196px of it redundant.
 	const sidebar = page.getByRole('navigation', { name: 'Primary' });
+	await expect(sidebar.getByText('Files')).toHaveCount(0);
+	await expect(sidebar.getByRole('button', { name: /^Expand/ })).toHaveCount(0);
 	expect(stub.trees['']).toBe(1);
 
-	await sidebar.getByRole('button', { name: 'Expand src' }).click();
-	await expect(sidebar.getByRole('link', { name: 'compiler.js' })).toBeVisible();
-	expect(stub.trees.src).toBe(1);
-
-	// Opening the same directory in the main column is now a local read.
+	// Nor on the file screen, which carried the same tree.
 	await listing(page).getByRole('link', { name: 'src' }).click();
-	await expect(listing(page).getByRole('link', { name: 'compiler.js' })).toBeVisible();
-	expect(stub.trees.src).toBe(1);
+	await listing(page).getByRole('link', { name: 'compiler.js' }).click();
+	await expect(line(page, 1)).toBeVisible();
+	await expect(sidebar.getByText('Files')).toHaveCount(0);
 });
 
 test('a tree addressed by SHA is permanent, however stale the branch has gone', async ({
@@ -2450,9 +2532,9 @@ test('a tree address that names a file lands on the file screen', async ({ page 
 
 test('a readme code fence is read by the same scanner as the file screen', async ({ page }) => {
 	await signIn(page);
-	await openRepo(page);
+	await openSummary(page);
 
-	const main = page.getByRole('main');
+	const main = readme(page);
 	await expect(main.getByText('bun install')).toBeVisible();
 	await expect(main.locator('pre .cm')).toHaveText('# get started');
 });
@@ -2811,8 +2893,7 @@ test('a further page is fetched once, and walking back down it is free', async (
 	// Leave and come back, then walk the whole way down again. The first page is
 	// inside its window and each page behind it is filed under the cursor that
 	// fetched it, so the second walk costs nothing at all.
-	await page.goto('/sveltejs/svelte');
-	await expect(listing(page).getByRole('link', { name: 'README.md' })).toBeVisible();
+	await openRepo(page);
 	await openLog(page);
 
 	await page.getByRole('button', { name: 'Load more' }).click();
@@ -3574,12 +3655,6 @@ test('the dots on a listing are projected from that one comparison', async ({ pa
 		0
 	);
 
-	// The sidebar's tree is dotted from the same answer, not a second one.
-	const tree = page.getByRole('navigation', { name: 'Primary' });
-	await expect(
-		tree.getByRole('img', { name: /changed since your last visit/ }).first()
-	).toBeVisible();
-
 	expect(Object.keys(stub.compares)).toHaveLength(1);
 });
 
@@ -3952,6 +4027,19 @@ function group(page: Page, name: string) {
 	return bar(page).getByRole('group', { name });
 }
 
+/**
+ * Every list the palette draws on has arrived.
+ *
+ * The account's pull requests come off IndexedDB a beat after the overlay
+ * opens, and a group that lands *above* the cursor moves what is under it — the
+ * palette follows the row rather than the index, which is right and is exactly
+ * what makes an assertion about position race the data. So a test that talks
+ * about the nth row waits for the nth row to mean something.
+ */
+async function settled(page: Page) {
+	await expect(group(page, 'Pull requests').getByRole('option')).toHaveCount(3);
+}
+
 test('⌘K opens the palette anywhere, and the screen behind it stops hearing keys', async ({
 	page
 }) => {
@@ -4101,6 +4189,7 @@ test('the palette leads with what moved while you were away', async ({ page }) =
 test('arrows move the cursor and symbols are honestly unimplemented', async ({ page }) => {
 	await signIn(page);
 	await openPalette(page);
+	await settled(page);
 
 	const options = bar(page).getByRole('option');
 	await expect(options.first()).toHaveAttribute('aria-selected', 'true');
@@ -4125,13 +4214,17 @@ test('the pointer moves the cursor, and only when it actually moves', async ({ p
 	// overlay appears where the mouse already was, which is not a choice.
 	await page.mouse.move(640, 400);
 	await openPalette(page);
+	await settled(page);
 
 	const options = bar(page).getByRole('option');
 	await expect(options.first()).toHaveAttribute('aria-selected', 'true');
 
-	// Moving it is a choice, and it selects.
+	// Moving it is a choice, and it selects. A point inside the row rather than
+	// `hover()`, which would be a no-op if the mouse were parked on that pixel
+	// already — which is the very case being tested above.
 	const third = options.nth(2);
-	await third.hover();
+	const box = await third.boundingBox();
+	await page.mouse.move((box?.x ?? 0) + 12, (box?.y ?? 0) + 6);
 	await expect(third).toHaveAttribute('aria-selected', 'true');
 	await expect(options.first()).toHaveAttribute('aria-selected', 'false');
 });

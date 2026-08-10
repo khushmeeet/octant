@@ -9,6 +9,7 @@
 		githubCompareUrl,
 		parseFileAnchor,
 		refsHref,
+		repoHref,
 		treeHref,
 		type CompareAddress
 	} from '$lib/nav/paths';
@@ -140,7 +141,7 @@
 
 	const crumbs = $derived.by<Crumb[]>(() => [
 		{ label: repo.owner },
-		{ label: repo.name, href: treeHref(repo, null) },
+		{ label: repo.name, href: repoHref(repo) },
 		{ label: 'refs', href: refsHref(repo) },
 		{ label: range, mono: true }
 	]);

@@ -6,7 +6,7 @@
 	import Icon from '$lib/ui/Icon.svelte';
 	import { count } from '$lib/ui/format';
 	import { GRAMMAR, parseQuery } from './grammar';
-	import { isPaletteChord, palette } from './palette.svelte';
+	import { isPaletteChord, lastPointer, palette } from './palette.svelte';
 	import { segments } from './rank';
 	import { paletteResults } from './results.svelte';
 	import type { Result } from './types';
@@ -116,8 +116,22 @@
 		held = rows[cursor]?.id ?? null;
 	}
 
+	/**
+	 * Where the pointer was before this overlay existed. Every row's move is
+	 * measured against it, so an event that arrives at the pixel the mouse was
+	 * already sitting on is what it is: the browser telling us the page moved,
+	 * not the mouse. `movementX`/`movementY` would be the obvious test and are
+	 * not a reliable one — they are zero for synthesised input of every kind.
+	 */
+	let seen = lastPointer();
+
 	/** The pointer moving over a row is the same act as pressing down-arrow. */
-	function point(at: number): void {
+	function point(at: number, event: PointerEvent): void {
+		const from = seen;
+		seen = { x: event.clientX, y: event.clientY };
+
+		if (!from || (from.x === seen.x && from.y === seen.y)) return;
+
 		cursor = at;
 		held = rows[at]?.id ?? null;
 	}
@@ -223,7 +237,7 @@
 		title={entry.title}
 		type={entry.href ? undefined : 'button'}
 		onclick={(event: MouseEvent) => open(entry, event)}
-		onpointermove={() => point(at)}
+		onpointermove={(event: PointerEvent) => point(at, event)}
 	>
 		<Icon name={entry.icon} muted />
 		<span class="what" class:mono={entry.mono}>{@render label(entry.label, entry.hits)}</span>

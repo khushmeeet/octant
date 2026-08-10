@@ -16,7 +16,8 @@ outside the scope below links out.
 | Surface | Answers                                    |
 | ------- | ------------------------------------------ |
 | Home    | What needs me, and which repositories are there? |
-| Tree    | What is this repo, and what just landed?   |
+| Summary | What is this repository, and what just landed? |
+| Tree    | What is in this directory?                 |
 | Log     | What changed, how big, by whom?            |
 | File    | Who wrote this line and why?               |
 | Refs    | What has shipped, and what's in flight?    |
@@ -61,7 +62,16 @@ here; the specification — tokens, metrics, component inventory — lives in
 
 **Navigation is git's primitives, not GitHub's product surface.**
 Four items: Tree, Log, Refs, Review. Branches and tags are the same object,
-so they share one screen.
+so they share one screen. The repository *itself* is the fifth destination and
+is deliberately not a fifth item: it is the badge above them, which already
+named the repository and now goes to it.
+
+**A screen is about one object.** The Tree screen was two — a directory, and
+the repository whose README and clone URLs it carried under and beside that
+directory's listing. Splitting them gave the repository its own address, which
+is the one people paste and arrive at, and left the tree with one job. The
+sidebar's copy of the tree went at the same time: the palette indexes every path
+in the repository, so a tree in 196px was a slower way to ask the same question.
 
 **Every object carries its own verbs.** The header exposes the current
 object's actions inline, beside the pills that identify it — on a file:
@@ -130,6 +140,7 @@ what powers "since your last review" without us storing a single blob.
 | ----------------- | ----------------------------------------------------------------------------------------------------------------- |
 | Home, repos       | GraphQL `viewer.repositories(orderBy: PUSHED_AT)`, each with `pullRequests(states: OPEN).totalCount`              |
 | Home, in flight   | GraphQL `search(type: ISSUE)` twice — `author:@me` and `review-requested:@me`, merged by repository and number    |
+| Summary           | The repository query, the root listing, and the README's blob by object ID — three reads, none of them new       |
 | Tree              | GraphQL `repository.object(expression: "REF:path")` → `Tree.entries` with `name`, `type`, `mode`, `Blob.byteSize` |
 | File contents     | GraphQL `Blob.text`; fall back to `raw.githubusercontent.com` for large or binary blobs                           |
 | Blame             | GraphQL `Commit.blame(path:)` → ranges with their commits                                                         |
@@ -337,8 +348,10 @@ Accepted, with the mitigation or the deferral noted.
 
 - Does GitHub's SPA client support for GitHub Apps ship what §8 describes?
   Determines whether OAuth needs an edge function at all.
-- Does the file tree persist across navigation, or is it contextual per
-  screen? Currently contextual — worth testing both.
+- ~~Does the file tree persist across navigation, or is it contextual per
+  screen?~~ Answered by deleting it. The palette opens any path in the
+  repository by name from a single index, which is what the sidebar tree was
+  approximating one directory at a time.
 - How many repos should sync in the background? Unbounded polling will hit
   the rate limit; a pinned set is probably right.
 - Should review comments be writable in v1, or is this strictly read-only

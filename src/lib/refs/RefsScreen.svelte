@@ -5,6 +5,7 @@
 		compareHref,
 		logHref,
 		refsHref,
+		repoHref,
 		treeHref,
 		type RefsAddress,
 		type RefSelection
@@ -445,7 +446,7 @@
 	const crumbs = $derived.by<Crumb[]>(() => {
 		const list: Crumb[] = [
 			{ label: repo.owner },
-			{ label: repo.name, href: treeHref(repo, null) },
+			{ label: repo.name, href: repoHref(repo) },
 			{ label: 'refs', href: refsHref(repo) }
 		];
 		if (selected) list.push({ label: selected.name, mono: true });

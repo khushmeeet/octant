@@ -207,13 +207,22 @@ export function paletteResults(input: () => PaletteContext): PaletteResults {
 			const where = `${repo.owner}/${repo.name}`;
 			rows.push(
 				{
+					id: 'screen:summary',
+					icon: 'file',
+					label: 'Summary',
+					meta: where,
+					title: 'What this repository is, and its README',
+					href: repoHref(repo),
+					warm: () => prefetch(GitHubSource.getRepo(repo))
+				},
+				{
 					id: 'screen:tree',
 					icon: 'folder',
 					label: 'Tree',
 					meta: where,
 					title: 'Browse the files',
 					href: treeHref(repo, rev),
-					warm: () => prefetch(GitHubSource.getRepo(repo))
+					warm: () => prefetch(GitHubSource.getTree(repo, rev ?? 'HEAD', ''))
 				},
 				{
 					id: 'screen:log',

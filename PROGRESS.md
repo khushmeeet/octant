@@ -2014,9 +2014,18 @@ and handles the chord itself, because ⌘K has to close what it opened.
 **The pointer moves the cursor only when it moves.** The overlay opens wherever
 the mouse was last left, so `pointerenter` would hand the selection to whatever
 row happened to render underneath it — the suite caught exactly that, as a first
-row that was not selected. `pointermove` is the fix and it is also the honest
-model: moving the pointer is a choice, having left it somewhere is not. With
-that, hover and selection are the same state, so the row's hover style went
+row that was not selected. `pointermove` is most of the fix and is the honest
+model: moving the pointer is a choice, having left it somewhere is not.
+
+It is not all of the fix, because **the browser synthesises a pointer move when
+content appears under a stationary cursor**, which is this exact situation. The
+obvious test for a synthetic move is `movementX`/`movementY`, and it is the
+wrong one: those are zero for synthesised input of every kind, including a real
+automated move, so the guard also rejected the thing it was meant to allow.
+What works is knowing where the pointer already was — the palette's module
+records it on a passive window listener while the overlay is closed, and a row
+event that arrives at that same pixel is the page moving rather than the mouse.
+With that, hover and selection are the same state, so the row's hover style went
 away rather than drawing a second highlight next to the real one.
 
 **The cursor holds an id, not an index.** Rows arrive as their lists do — the
@@ -2091,6 +2100,125 @@ seen it do so. And the revision we hand it is a *commit* SHA rather than a tree
 SHA, which git resolves and GitHub documents, but which no response has
 confirmed; if the index ever comes back empty on a real repository, that is the
 first thing to check.
+
+---
+
+## The summary screen — one screen, one object
+
+**Done when:** a repository opens on what it is rather than on one of its
+directories, and the tree is a screen about a directory. ✅
+
+### What changed
+
+Two deletions and one new screen, and the first deletion is what paid for the
+other two.
+
+| File | Role |
+|---|---|
+| `summary/SummaryScreen.svelte` | the repository's own screen: what it is, what just landed, its README |
+| `ui/FileTree.svelte` | **deleted** |
+| `ui/FileTreeNode.svelte` | **deleted** |
+
+Reworked: `[owner]/[name]/+page.svelte` renders the Summary rather than the
+Tree; `treeHref(repo, null)` is `/tree/HEAD` rather than the repository's front
+page; `TreeScreen` lost the README, the clone strip and the sidebar tree;
+`FileScreen` lost the sidebar tree; `Sidebar`'s Tree item points at `/tree/HEAD`
+and its badge lights up on the Summary; `Markdown` gained `wide`;
+`ui/types.ts` lost `TreeMarks`; five screens' breadcrumbs point the repository's
+name at the repository.
+
+**The sidebar tree was the load-bearing deletion.** It is what made the Tree
+screen carry a second copy of itself, and it is what made "remove the Files
+section" and "give the repository its own screen" the same piece of work. Phase
+9 is why it could go: ⌘K indexes every path in the repository from one request
+and opens any of them by name, which is what an expanding tree in 196px was
+approximating one directory at a time. The e2e suite lost a test that asserted
+the sidebar shared its listing with the main column, and gained one that asserts
+there is no sidebar tree on either screen it used to be on.
+
+### Decisions
+
+**A screen is about one object.** The Tree screen was about two: the directory
+in its listing, and the repository whose README sat under that listing and whose
+clone URLs sat above it. That is why it read differently at the root than three
+levels down, and why the repository's own address — the one you paste, link and
+arrive at from the home screen — answered "what is in this directory" when the
+question was "what is this". The split gives each one screen and leaves the tree
+with one job at every depth.
+
+**The root of the tree is `/tree/HEAD`, not `/`.** `treeHref(repo, null)` used
+to alias to the repository's front page, which was true when they were the same
+screen and is a lie now. Changing the one function fixed every caller: a verb
+that says *browse* goes to the tree, and a breadcrumb that names the repository
+goes to the repository. Both rules are stated in `nav/paths.ts`, which is the
+file that decides them.
+
+**The badge is the fifth destination, and the four items stay four.**
+ARCHITECTURE.md §2 is explicit that navigation is git's primitives, and a
+repository summary is not one of them — so it is not an item. It is the thing
+that already named the repository at the top of the sidebar and already linked
+there; it now takes the same `--sel` fill an item does when you are on it. The
+alternative was a fifth nav item that would have made the row of primitives
+mean two different kinds of thing.
+
+**The README is full width, and that is a deliberate exception.** Prose reads
+best at about 76 characters and `Markdown` still defaults to it everywhere else
+— but on a screen whose content *is* the README, a measure floating in the left
+third of a wide window reads as a rendering failure rather than as typography.
+So `wide` is a prop rather than a change to the component's default, and the
+Summary is its only caller.
+
+**The head commit is a sentence now.** It was two pills and a panel row —
+`0f1a2b3` and `Committed 8d` — which is the SHA and the age without the fact.
+On the Summary it is a line you can read: the SHA opens the commit, the headline
+says what landed, the author and age sit at the end. ARCHITECTURE.md §2 already
+said the repository's own HEAD commit is what a per-file last-commit column was
+approximating; this is the first screen that shows it as such.
+
+### Deliberately not done
+
+- **No fifth nav item.** See above.
+- **The tree's breadcrumb still points its repository name at the tree root**,
+  not at the Summary — inside a path, every crumb is a directory, and one that
+  silently left the tree would break walking up. The badge is the way out.
+- **The Summary does not list the last commit per top-level entry.**
+  ARCHITECTURE.md §2 rules that column out for costing a blame walk per row, and
+  it costs exactly the same here.
+- **No languages bar, no contributors, no topics.** They are the parts of a
+  GitHub repository page that are about the project as a product, and §1's
+  out-of-scope list is the contract.
+
+### Verification
+
+`bun run check` (0 errors), `bun run lint` and `bun run build` all pass.
+`npx playwright test` — 102 passed.
+
+The suite moved rather than grew: `openRepo` now means the Tree screen and
+`openSummary` means the repository, and the tests that were really about the
+README, the clone strip or the blob cache moved to the second. Three are new:
+
+- **a repository opens on what it is**, with the description, the head commit as
+  a line whose SHA opens the commit, the clone strip and no listing — from two
+  reads, the second of which is the one the Tree screen renders from, so walking
+  next door costs nothing;
+- **the badge is the way back**, and carries `aria-current` only when you are on
+  the Summary;
+- **the sidebar carries no second copy of the tree**, on the Tree screen or the
+  File screen, and the root listing is fetched once rather than twice.
+
+Both themes checked by screenshot at 1280px — the Summary with its README at
+full width, and the Tree screen reduced to its listing.
+
+Two palette tests were flaky before they were right, and the flake was worth
+reading rather than retrying: they asserted *positions* — the first row is
+selected, the second row is now — while the account's lists were still arriving
+from IndexedDB. The palette follows the row rather than the index by design, so
+a group landing above the cursor moves what is under it; the tests now wait for
+the lists to settle before talking about an nth row. A `--repeat-each=2` run
+also reproduced the pre-existing two-worker flake this file already records: two
+Phase 5 and Phase 8 tests timing out at five seconds waiting for a first paint,
+on a loaded machine, both passing repeatedly in isolation and in every
+single-worker run.
 
 ---
 

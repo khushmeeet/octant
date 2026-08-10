@@ -32,3 +32,29 @@ export const palette = {
 export function isPaletteChord(event: KeyboardEvent): boolean {
 	return (event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k';
 }
+
+/* --------------------------------------------------------------- pointer -- */
+
+/**
+ * Where the pointer was when the palette opened.
+ *
+ * The overlay appears wherever the mouse was last left, and the browser then
+ * **synthesises** a pointer move for whatever row landed underneath it — so
+ * "a pointer event arrived" is not the same as "the pointer moved", and taking
+ * the first for the second hands the selection to a row nobody chose. Knowing
+ * where the pointer already was is what tells the two apart.
+ *
+ * Deliberately not `$state`: it is written on every mouse move in the app and
+ * read once per palette. Making it reactive would put a render cycle behind
+ * every pixel of pointer travel to answer a question asked twice a minute.
+ */
+let pointer: { x: number; y: number } | null = null;
+
+export function rememberPointer(event: PointerEvent): void {
+	pointer = { x: event.clientX, y: event.clientY };
+}
+
+/** `null` until the pointer has moved at all — a keyboard-only session. */
+export function lastPointer(): { x: number; y: number } | null {
+	return pointer;
+}

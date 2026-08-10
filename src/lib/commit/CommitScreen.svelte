@@ -8,6 +8,7 @@
 		githubCommitUrl,
 		logHref,
 		parseFileAnchor,
+		repoHref,
 		treeHref,
 		type CommitAddress
 	} from '$lib/nav/paths';
@@ -120,7 +121,7 @@
 
 	const crumbs = $derived.by<Crumb[]>(() => [
 		{ label: repo.owner },
-		{ label: repo.name, href: treeHref(repo, null, '') },
+		{ label: repo.name, href: repoHref(repo) },
 		{ label: 'commits', href: logHref(repo, null, '') },
 		{ label: data?.abbreviatedOid ?? rev.slice(0, 7), mono: true }
 	]);

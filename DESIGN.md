@@ -141,8 +141,16 @@ repository browser is a dense list and the rows are worth more than the border.
 
 **Sidebar** — org badge (18px, 5px radius, accent fill) then four nav items:
 Tree, Log, Refs, Review, each with a count on the right. Below, a contextual
-section whose heading changes per screen (`Files`, `Symbols`, `Scope`,
-`Threads`) — and which is absent, heading and all, on a screen that has none.
+section whose heading changes per screen (`Scope`, `Threads`, and a commit's
+`Files`) — and which is absent, heading and all, on a screen that has none,
+which is now most of them.
+
+The badge is a destination as well as a label: it is the repository's own
+screen, the Summary, and it takes the same `--sel` fill a nav item takes when
+you are on it. Tree and File used to carry an expanding copy of the repository's
+tree under a `Files` heading; it is gone. ⌘K opens any path in the repository by
+name, which is what a tree in 196px was a slower way to do, and the space is
+worth more as quiet.
 
 The home screen is the one place the four are replaced rather than filled in:
 git's primitives are questions about a repository, and above one they have
@@ -174,7 +182,14 @@ there. They had a 32px row of their own until it was cut: it repeated the
 object's name from the breadcrumb and pushed every screen's content a line
 down for verbs that fit next to the pills.
 
-**Clone strip** — Tree screen only. Two labelled URLs, `read-only` and
+**Summary** — the repository's own screen, and where it opens. Description at
+13px, then one line for the head commit — SHA in accent mono, headline, author
+and age right-aligned — then the clone strip, all above a hairline. Below it the
+README, **at the full width of the main column**: here the prose is the screen
+rather than a note under a listing, and the 76-character measure that reads best
+beside something else reads as unfinished with nothing beside it.
+
+**Clone strip** — Summary screen only. Two labelled URLs, `read-only` and
 `read/write`, in mono at 11.5px.
 
 **Row** — 32px, flex, hover and selected states. Composition varies by

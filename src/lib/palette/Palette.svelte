@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Bar from './Bar.svelte';
-	import { isPaletteChord, palette } from './palette.svelte';
+	import { isPaletteChord, palette, rememberPointer } from './palette.svelte';
 
 	/**
 	 * The palette's mount point and its shortcut — PLAN.md Phase 9.
@@ -10,8 +10,10 @@
 	 * ones that have their own window-level key handling.
 	 *
 	 * Everything that costs anything lives in `Bar.svelte`, which is mounted only
-	 * while the palette is open. So the app carries one key listener for this
-	 * feature when it is closed, and not a single read.
+	 * while the palette is open. So the app carries two listeners for this
+	 * feature when it is closed, and not a single read. The second one writes
+	 * down where the pointer is, which is what lets the overlay tell a mouse that
+	 * moved from a mouse that was merely already there — see `palette.svelte.ts`.
 	 */
 	function onKeydown(event: KeyboardEvent): void {
 		if (!isPaletteChord(event)) return;
@@ -22,7 +24,7 @@
 	}
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} onpointermove={rememberPointer} />
 
 {#if palette.open}
 	<Bar />

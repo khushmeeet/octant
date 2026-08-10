@@ -19,7 +19,6 @@
 	import { ERROR_LABEL, GitHubSource } from '$lib/source';
 	import { prefetch } from '$lib/sync/prefetch';
 	import { resource } from '$lib/sync/resource.svelte';
-	import FileTree from '$lib/ui/FileTree.svelte';
 	import Header from '$lib/ui/Header.svelte';
 	import Pill from '$lib/ui/Pill.svelte';
 	import RightPanel from '$lib/ui/RightPanel.svelte';
@@ -69,8 +68,6 @@
 	/* -------------------------------------------------------------- since -- */
 
 	const since = sinceLastVisit(() => ({ repo, rev, head: summary.data?.head?.oid ?? null }));
-
-	const treeMarks = $derived({ mark: (at: string) => since.mark(at) });
 
 	/** What landed in *this* file, from the comparison the panel already made. */
 	const changedHere = $derived(since.fileChange(path) ?? null);
@@ -404,15 +401,16 @@
 <svelte:window onkeydown={onKeydown} />
 
 {#snippet sidebar()}
+	<!-- No contextual section: the sidebar's copy of the tree was deleted with
+	     the Tree screen's, and for the same reason — ⌘K opens any file in the
+	     repository by name, which is what a tree in 196px was approximating. -->
 	<Sidebar
 		repo={summary.data}
 		active="tree"
 		rev={address.rev}
 		treeCount={siblings.data?.entries.length ?? null}
-		section="Files"
-	>
-		<FileTree {repo} {rev} hrefRev={address.rev} current={dir} file={path} marks={treeMarks} />
-	</Sidebar>
+		section={null}
+	/>
 {/snippet}
 
 {#snippet pills()}
