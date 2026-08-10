@@ -1,0 +1,30 @@
+# fly.toml app configuration file for octant
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'octant'
+primary_region = 'sjc'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+  [[http_service.checks]]
+    grace_period = '5s'
+    interval = '30s'
+    timeout = '5s'
+    method = 'GET'
+    path = '/'
+
+# Serving pre-built static files: nginx needs almost nothing to do it.
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '512mb'
