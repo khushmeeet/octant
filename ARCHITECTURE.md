@@ -13,19 +13,36 @@ outside the scope below links out.
 
 **In scope**
 
-| Surface | Answers                                   |
-| ------- | ----------------------------------------- |
-| Tree    | What is this repo, and what just landed?  |
-| Log     | What changed, how big, by whom?           |
-| File    | Who wrote this line and why?              |
-| Refs    | What has shipped, and what's in flight?   |
-| Review  | What changed since I last looked at this? |
-| Command | Take me straight to the thing.            |
+| Surface | Answers                                    |
+| ------- | ------------------------------------------ |
+| Home    | What needs me, and which repositories are there? |
+| Tree    | What is this repo, and what just landed?   |
+| Log     | What changed, how big, by whom?            |
+| File    | Who wrote this line and why?               |
+| Refs    | What has shipped, and what's in flight?    |
+| Review  | What changed since I last looked at this?  |
+| Command | Take me straight to the thing.             |
 
 **Explicitly out of scope** — Actions, Projects, Discussions, Wiki, Issues,
 org and repo settings, billing, security tab, marketplace, social features
 (stars, follows, feeds). No write operations beyond review comments in a
 later phase.
+
+**Home is the one account surface, and it is deliberate.** This document
+originally ruled the account out along with the rest of GitHub's product and
+opened the app on a text field you typed `owner/name` into. That was wrong in
+the way a login form is wrong: the first question a client of your own
+repositories should answer is what needs you today, and the second is which
+repositories there are. So the arrival screen lists the open pull requests you
+wrote or have been asked to review, with the repositories the token can see one
+click away — one view at a time, because a landing screen either answers a
+question or makes you scroll past one to reach the other.
+
+Nothing else about the account follows it in. There are no stars, no
+followers, no feed, no notifications inbox, no organisation pages — one list of
+repositories and one list of pull requests, both of which are ways into the
+six repository surfaces above. §7's fan-out rule is untouched: each list is one
+bounded query, and a row costs nodes rather than a request.
 
 **Non-goals**
 
@@ -111,6 +128,8 @@ what powers "since your last review" without us storing a single blob.
 
 | Screen            | Source                                                                                                            |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Home, repos       | GraphQL `viewer.repositories(orderBy: PUSHED_AT)`, each with `pullRequests(states: OPEN).totalCount`              |
+| Home, in flight   | GraphQL `search(type: ISSUE)` twice — `author:@me` and `review-requested:@me`, merged by repository and number    |
 | Tree              | GraphQL `repository.object(expression: "REF:path")` → `Tree.entries` with `name`, `type`, `mode`, `Blob.byteSize` |
 | File contents     | GraphQL `Blob.text`; fall back to `raw.githubusercontent.com` for large or binary blobs                           |
 | Blame             | GraphQL `Commit.blame(path:)` → ranges with their commits                                                         |
@@ -124,6 +143,18 @@ what powers "since your last review" without us storing a single blob.
 One query per screen. Queries are shaped to the screen, not to the domain
 model: a screen's main content and all three sidebar blocks come back in a
 single round trip. No waterfalls.
+
+Home is the exception that proves the shape: it is two screens' worth of
+question — what exists, and what is waiting — so it is two queries, issued in
+parallel and never chained. The repository list pages; the pull requests do
+not, because a landing screen that needs a second page of them is a triage
+screen, and triage is per repository.
+
+The two searches are the one place we depend on GitHub's issue index rather
+than on a connection, and the trade is deliberate: `viewer.pullRequests`
+returns only what you wrote, and the pull requests that need you most are the
+ones somebody else did. The cost is indexing lag of a few seconds on a pull
+request opened moments ago.
 
 ---
 
@@ -141,6 +172,7 @@ Only a thin mutable layer needs refreshing.
 | ----------- | ---------------------- | ------------------------------------------------- | ---------------------------------------------------------- |
 | `immutable` | `kind:repo:sha[:path]` | trees, blobs, commits, blame ranges, diffs        | Write once. Never invalidate. LRU evict on quota pressure. |
 | `mutable`   | `kind:repo:id`         | ref→SHA map, PR state, check runs, review threads | Revalidate on a tick; store `etag` and `fetchedAt`.        |
+| `mutable`   | `kind:@login[:id]`     | the account's repository list and its pull requests | Same policy. Keyed by login, not by repo: one browser may hold two tokens, and they see different things. |
 | `visits`    | `objectId`             | `lastSeenAt`, `lastSeenSha`                       | Local only. Never fetched.                                 |
 | `meta`      | fixed keys             | token metadata, rate-limit state, schema version  | —                                                          |
 
@@ -168,6 +200,9 @@ We store, per object, when the user last looked at it and what SHA was
 current at the time. Every sidebar's first block is a comparison between
 that record and what the API returns now:
 
+- Home row: a dot if the repository has been pushed to since you last opened
+  it — a time comparison rather than a SHA one, because the list carries
+  `pushedAt` and asking for a head per row would be a field per row
 - Repo: commits landed since, and how many touched paths you own
 - Tree row: a dot if the directory contains such a commit
 - File: lines changed since, and by whom
@@ -230,9 +265,10 @@ Two interfaces separate the UI from everything else. Both exist from day one
 even though there is only one implementation of each.
 
 **`Source`** — where data comes from. `getRepo`, `getTree`, `getBlob`,
-`getLog`, `getBlame`, `getRefs`, `getPulls`, `getDiff`, `compare`.
-Implemented by `GitHubSource`. A future `LocalSource` backed by a git
-sidecar would satisfy the same interface.
+`getLog`, `getBlame`, `getRefs`, `getPulls`, `getDiff`, `compare` — and, for
+the home screen, `getViewerRepos` and `getViewerPulls`, the only two that name
+an account rather than a repository. Implemented by `GitHubSource`. A future
+`LocalSource` backed by a git sidecar would satisfy the same interface.
 
 **`Store`** — where data is kept. `get`, `put`, `evict`, plus the visit
 methods. Implemented by `IdbStore`. A future SQLite-backed store swaps in
@@ -246,6 +282,7 @@ GitHub.
 ```
 src/lib/
   auth/         token provider, validation, entry gate
+  home/         the arrival screen: your repositories, and what needs you
   source/       Source interface, GitHubSource, GraphQL documents
   store/        Store interface, IdbStore, schema + migrations
   sync/         revalidation ticks, rate-limit accounting, prefetch

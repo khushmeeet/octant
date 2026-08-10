@@ -17,6 +17,7 @@ import type { RepoRef } from '$lib/source/types';
  *
  *   immutable   kind:owner/name:sha[:path]
  *   mutable     kind:owner/name[:id]
+ *   account     kind:@login[:id]
  */
 
 export type CacheStore = 'immutable' | 'mutable';
@@ -49,6 +50,20 @@ export function immutableKey(kind: string, repo: RepoRef, sha: string, path = ''
 /** Revalidated on a tick, carries an ETag. */
 export function mutableKey(kind: string, repo: RepoRef, id = ''): CacheKey {
 	return { store: 'mutable', id: join(kind, slug(repo), id) };
+}
+
+/**
+ * Keyed by an account rather than by a repository — the home screen's two reads
+ * are about *you*, not about a repo.
+ *
+ * The login is in the key rather than left out because a cache is a shared
+ * disk: two accounts used from one browser must not read each other's list of
+ * repositories, and one of them may be a work token that can see repositories
+ * the other cannot. It cannot collide with a repository's own slug, which
+ * always contains the `/` that `@login` structurally cannot.
+ */
+export function accountKey(kind: string, login: string, id = ''): CacheKey {
+	return { store: 'mutable', id: join(kind, `@${login}`, id) };
 }
 
 /**

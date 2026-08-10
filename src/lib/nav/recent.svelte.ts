@@ -3,12 +3,18 @@ import { idbGet, idbPut } from '$lib/store/idb';
 import { META, STORE } from '$lib/store/schema';
 
 /**
- * Repositories opened before — the entry screen's list.
+ * Repositories opened before — what the background tick pins.
  *
  * This is not cached data and it is not a `Store` concern: it is one small
  * record of what this person does, in the same family as `visits`. It lives in
  * `meta` under a fixed key rather than getting a store of its own, because
  * twelve entries do not need an index.
+ *
+ * It had a screen of its own until the home screen replaced it, and it does not
+ * need one back: `sync/tick.ts` reads the top three as the pinned set
+ * (ARCHITECTURE.md §12), and what you can open is now a list from GitHub rather
+ * than a list of where you have been. PLAN.md Phase 9 wants it again as a
+ * palette result group, which is the next thing that will read it.
  */
 
 export interface RecentRepo extends RepoRef {
@@ -40,13 +46,12 @@ export const recent = {
 		await recent.hydrate();
 		list = [{ ...ref, at: Date.now() }, ...without(list, ref)].slice(0, KEEP);
 		await persist();
-	},
-
-	async forget(ref: RepoRef): Promise<void> {
-		await recent.hydrate();
-		list = without(list, ref);
-		await persist();
 	}
+
+	// There was a `forget` here, for the × on a row of the old entry screen's
+	// list. Nothing calls it now that the list has no UI, and an exported method
+	// with no caller is a promise about behaviour nobody has checked in a while.
+	// It is five lines when a screen wants it back.
 };
 
 function without(entries: RecentRepo[], ref: RepoRef): RecentRepo[] {

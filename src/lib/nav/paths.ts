@@ -8,7 +8,7 @@ import { lineHash, type LineRange } from './lines';
  * The URL scheme — PLAN.md Phase 3, which replaces Phase 0's local `active`
  * state with routing.
  *
- *   /                                   choose a repository
+ *   /                                   your repositories, and what needs you
  *   /{owner}/{name}                     tree at the default branch, root
  *   /{owner}/{name}/tree/{rev}          tree at a revision, root
  *   /{owner}/{name}/tree/{rev}/{path}   tree at a revision, in a directory
@@ -115,6 +115,38 @@ export interface CompareAddress {
 	/** Where the range starts. Either endpoint may be a SHA or a name. */
 	base: string;
 	head: string;
+}
+
+/* ----------------------------------------------------------------- home -- */
+
+/**
+ * The account screen — the two lists that are about you rather than about a
+ * repository. Which of them is on screen is a query parameter and not a
+ * segment, the same line the rest of this file draws: they are views of one
+ * address, not two addresses.
+ *
+ * **Pull requests are the default**, so the app opens on the half with a
+ * deadline. There was a third view that showed both lists stacked; it was the
+ * default and it was wrong — a landing screen either answers a question or
+ * asks you to scroll past one to find the other.
+ */
+export type HomeView = 'pulls' | 'repos';
+
+export interface HomeAddress {
+	view: HomeView;
+}
+
+const VIEWS: Record<string, HomeView> = { pulls: 'pulls', repos: 'repos' };
+
+export function homeHref(options: { view?: HomeView } = {}): string {
+	const base = resolve('/');
+	// `pulls` is the default and is left out, so the plain URL is the one the
+	// sidebar's badge points at and the one you would type.
+	return options.view === 'repos' ? `${base}?view=repos` : base;
+}
+
+export function parseHome(search?: URLSearchParams): HomeAddress {
+	return { view: VIEWS[search?.get('view') ?? ''] ?? 'pulls' };
 }
 
 export function repoHref(repo: RepoRef): string {

@@ -142,7 +142,24 @@ repository browser is a dense list and the rows are worth more than the border.
 **Sidebar** — org badge (18px, 5px radius, accent fill) then four nav items:
 Tree, Log, Refs, Review, each with a count on the right. Below, a contextual
 section whose heading changes per screen (`Files`, `Symbols`, `Scope`,
-`Threads`).
+`Threads`) — and which is absent, heading and all, on a screen that has none.
+
+The home screen is the one place the four are replaced rather than filled in:
+git's primitives are questions about a repository, and above one they have
+nothing to point at. It shows the account in the badge and two items — Pull
+requests, Repositories — which are views of the same address, and no
+contextual section at all. The geography is otherwise unchanged, which is the
+point: badge, items, counts and account sit exactly where they sit on every
+other screen.
+
+**Home** — one table, with the standard 28px column header and no heading
+above it: the sidebar says which of the two you are looking at. Pull requests
+by default, across every repository, so the row leads with the repository
+name; repositories on the other view, ordered by what was pushed to. One
+filter field above, which is also where you type `owner/name` — that offers a
+single row above the table, in either view, because it is an address rather
+than a result. With no row selected the header carries pills and no verbs:
+there is no object to carry them.
 
 **Header** — breadcrumb left; the object's group and then the chrome, right.
 The object's group is its pills (ref, HEAD SHA, state — `Open`, `1 check
