@@ -383,10 +383,15 @@
 
 	/* ------------------------------------------------------------- chrome -- */
 
-	const crumbs = $derived.by<Crumb[]>(() => [
-		{ label: 'octant', href: homeHref() },
-		{ label: login ?? 'account' }
-	]);
+	/**
+	 * One crumb, because the address is one segment. Every other screen puts the
+	 * repository's owner at the root and links it here, so the root position means
+	 * *owner* everywhere in the app — putting the application's own name there
+	 * read as though `octant` owned the account, and its link pointed at the page
+	 * you were already on. The account is the whole of what this screen is about,
+	 * so it is the whole of the breadcrumb.
+	 */
+	const crumbs = $derived.by<Crumb[]>(() => [{ label: login ?? 'account' }]);
 
 	const head = $derived<NavHead>({
 		label: login ?? 'octant',
