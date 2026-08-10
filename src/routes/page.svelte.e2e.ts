@@ -27,7 +27,6 @@ const REPOSITORY = {
 	isPrivate: false,
 	isArchived: false,
 	url: 'https://github.com/sveltejs/svelte',
-	sshUrl: 'git@github.com:sveltejs/svelte.git',
 	diskUsage: 204800,
 	defaultBranchRef: {
 		name: 'main',
@@ -2098,7 +2097,7 @@ test('the tree screen carries the directory, and nothing that is not about it', 
 	// Three things that were here and are about the repository rather than about
 	// this directory: they belong to the Summary now, and the sidebar's second
 	// copy of the tree belongs nowhere.
-	await expect(page.getByLabel('Copy the read-only clone URL')).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Copy URL' })).toHaveCount(0);
 	await expect(
 		page.getByRole('main').getByRole('heading', { name: 'svelte', exact: true })
 	).toHaveCount(0);
@@ -2123,10 +2122,14 @@ test('a repository opens on what it is, not on one of its directories', async ({
 		`/sveltejs/svelte/commit/${HEAD}`
 	);
 
-	// The clone strip is about the repository, so this is where it lives now.
-	await expect(page.getByLabel('Copy the read-only clone URL')).toContainText(
-		'https://github.com/sveltejs/svelte.git'
-	);
+	// The clone URL is a string the screen exists to hand you, so it lives in
+	// the header's copy slot with every other screen's — not in a strip of its
+	// own asking you to pick a protocol.
+	const url = page.getByRole('button', { name: 'Copy URL' });
+	await expect(url).toHaveAttribute('title', 'Copy: https://github.com/sveltejs/svelte.git');
+	await url.click();
+	// As everywhere else: the label flips only once the clipboard took it.
+	await expect(page.getByRole('button', { name: 'Copied' })).toBeVisible();
 
 	// And no listing: the tree is the screen next door.
 	await expect(listing(page)).toHaveCount(0);

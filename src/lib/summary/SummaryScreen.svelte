@@ -4,7 +4,7 @@
 	import { ERROR_LABEL, GitHubSource, type RepoRef } from '$lib/source';
 	import { prefetch } from '$lib/sync/prefetch';
 	import { resource } from '$lib/sync/resource.svelte';
-	import CloneStrip from '$lib/ui/CloneStrip.svelte';
+	import { copy } from '$lib/ui/clipboard';
 	import Header from '$lib/ui/Header.svelte';
 	import Pill from '$lib/ui/Pill.svelte';
 	import RightPanel from '$lib/ui/RightPanel.svelte';
@@ -97,6 +97,26 @@
 		}
 	]);
 
+	/**
+	 * The clone URL, in the header's copy slot — where every other screen keeps
+	 * the one string it exists to hand you, and where you already look for it.
+	 *
+	 * It was a strip under the head commit offering two URLs labelled `read-only`
+	 * and `read/write`. Those labels were answering a question nobody was asking
+	 * on this screen: the choice between HTTPS and SSH is made once, in your git
+	 * config, and it was costing a row of the screen every visit to re-ask it.
+	 * One URL, in the place a copy verb lives on the Log, the Commit and the
+	 * Review screens, is the whole of what the strip was for.
+	 */
+	let copied = $state('');
+
+	async function put(label: string, text: string) {
+		if (await copy(text)) {
+			copied = label;
+			setTimeout(() => (copied = ''), 1200);
+		}
+	}
+
 	const about = $derived.by<PanelEntry[]>(() => {
 		const data = summary.data;
 		if (!data) return [];
@@ -152,7 +172,19 @@
 {/snippet}
 
 {#snippet header()}
-	<Header {crumbs} {pills} {verbs} />
+	<Header
+		{crumbs}
+		{pills}
+		{verbs}
+		utility={{
+			id: 'copy',
+			label: copied === 'url' ? 'Copied' : 'Copy URL',
+			title: summary.data ? `Copy: ${summary.data.cloneUrl}` : 'Copy the clone URL',
+			onselect: () => {
+				if (summary.data) put('url', summary.data.cloneUrl);
+			}
+		}}
+	/>
 {/snippet}
 
 {#snippet panel()}
@@ -195,8 +227,6 @@
 						</span>
 					</p>
 				{/if}
-
-				<CloneStrip https={summary.data.cloneUrl} ssh={summary.data.sshUrl} />
 			</section>
 		{/if}
 
@@ -236,8 +266,10 @@
 </Shell>
 
 <style>
+	/* The clone strip used to close this band off with padding of its own. With
+	   the URL in the header, the section owns both edges. */
 	.what {
-		padding: 14px var(--pad-main) 0;
+		padding: 14px var(--pad-main);
 		border-bottom: 1px solid var(--bd);
 	}
 
@@ -248,11 +280,15 @@
 		max-width: 76ch;
 	}
 
+	.desc:last-child {
+		margin-bottom: 0;
+	}
+
 	.head {
 		display: flex;
 		align-items: baseline;
 		gap: 8px;
-		margin: 0 0 10px;
+		margin: 0;
 		min-width: 0;
 	}
 

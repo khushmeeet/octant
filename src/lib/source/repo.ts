@@ -28,7 +28,6 @@ interface RepoNode {
 	isPrivate: boolean;
 	isArchived: boolean;
 	url: string;
-	sshUrl: string;
 	diskUsage: number | null;
 	defaultBranchRef: { name: string; target: HeadNode | null } | null;
 	branches: { totalCount: number };
@@ -49,7 +48,6 @@ export const REPO = document<{ repository: RepoNode | null }, RepoRef>({
 		isPrivate
 		isArchived
 		url
-		sshUrl
 		diskUsage
 		defaultBranchRef {
 			name
@@ -90,9 +88,14 @@ export interface RepoSummary {
 	isPrivate: boolean;
 	isArchived: boolean;
 	url: string;
-	/** DESIGN.md §5's clone strip: read-only, then read/write. */
+	/**
+	 * The HTTPS clone URL, and the only one. The Summary screen used to offer
+	 * this and the SSH URL side by side, labelled `read-only` and `read/write`;
+	 * the choice between the two is made once in your git config, not on every
+	 * visit to a repository, so the screen carries the one that works for
+	 * anybody and the header's copy verb hands it over.
+	 */
 	cloneUrl: string;
-	sshUrl: string;
 	diskUsageKb: number | null;
 	defaultBranch: string | null;
 	head: HeadCommit | null;
@@ -144,7 +147,6 @@ function summarise(node: RepoNode): RepoSummary {
 		url: node.url,
 		// GraphQL exposes no HTTPS clone field; it is the web URL with a suffix.
 		cloneUrl: `${node.url}.git`,
-		sshUrl: node.sshUrl,
 		diskUsageKb: node.diskUsage,
 		defaultBranch: node.defaultBranchRef?.name ?? null,
 		head: head?.oid

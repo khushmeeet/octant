@@ -211,13 +211,17 @@ down for verbs that fit next to the pills.
 
 **Summary** — the repository's own screen, and where it opens. Description at
 13px, then one line for the head commit — SHA in accent mono, headline, author
-and age right-aligned — then the clone strip, all above a hairline. Below it the
-README, **at the full width of the main column**: here the prose is the screen
-rather than a note under a listing, and the 76-character measure that reads best
-beside something else reads as unfinished with nothing beside it.
+and age right-aligned — both above a hairline. Below it the README, **at the
+full width of the main column**: here the prose is the screen rather than a note
+under a listing, and the 76-character measure that reads best beside something
+else reads as unfinished with nothing beside it.
 
-**Clone strip** — Summary screen only. Two labelled URLs, `read-only` and
-`read/write`, in mono at 11.5px.
+The clone URL is in the header's copy slot, `Copy URL`, with the URL itself in
+the title. It was a strip under the head commit offering two of them labelled
+`read-only` and `read/write`, and the labels were the problem: HTTPS or SSH is
+a decision made once in a git config, and re-asking it cost a row of the screen
+on every visit. Every other screen keeps the one string it exists to hand you in
+the same slot — `Copy SHA`, `Copy checkout` — so this is where you already look.
 
 **Row** — 32px, flex, hover and selected states. Composition varies by
 screen but the height and padding never do.
