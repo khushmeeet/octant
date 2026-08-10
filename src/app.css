@@ -33,6 +33,34 @@
 	--no-bg: rgba(229, 72, 77, 0.12);
 	--wn: #f2c94c;
 
+	/* A changed row in a diff. Stronger than the `--ok-bg` fill a pill takes,
+	   because this is what a diff is read *by*: a tint you have to look for is
+	   a tint that leaves you reading the sign column instead. */
+	--ok-line: rgba(76, 183, 130, 0.18);
+	--no-line: rgba(229, 72, 77, 0.18);
+
+	/* The same two, flattened against `--panel`. A diff's gutters and sign
+	   column are `position: sticky` over scrolling source, so they must be
+	   opaque — and they have to be the same colour as the row they belong to,
+	   or the tint stops at the sign and the row stops reading as one thing. */
+	--ok-row: #1a2e25;
+	--no-row: #361a1c;
+
+	/* The words that actually changed on a line that has a counterpart. The
+	   row's own tint, again, over the row's own tint — a second layer rather
+	   than a second colour. */
+	--ok-word: rgba(76, 183, 130, 0.38);
+	--no-word: rgba(229, 72, 77, 0.38);
+
+	/* The merge button under the pointer. The one filled button in the app, so
+	   it is the one colour that needs a hover shade of its own. */
+	--ok-hover: #5cc48f;
+
+	/* A pull request that landed. The one state in the app that is neither
+	   "concerns you" nor a diff, and the only thing purple is spent on. */
+	--mg: #a371f7;
+	--mg-bg: rgba(163, 113, 247, 0.16);
+
 	--kw: #a78bfa;
 	--str: #7fb88a;
 	--cm: #5c6067;
@@ -73,6 +101,20 @@
 	--no: #c93b40;
 	--no-bg: rgba(201, 59, 64, 0.1);
 	--wn: #b07d14;
+
+	--ok-line: rgba(46, 125, 91, 0.16);
+	--no-line: rgba(201, 59, 64, 0.16);
+
+	--ok-row: #ddeae4;
+	--no-row: #f6e0e0;
+
+	--ok-word: rgba(46, 125, 91, 0.32);
+	--no-word: rgba(201, 59, 64, 0.32);
+
+	--ok-hover: #26694b;
+
+	--mg: #8250df;
+	--mg-bg: rgba(130, 80, 223, 0.12);
 
 	--kw: #7c4ddb;
 	--str: #2e7d5b;

@@ -42,7 +42,12 @@ const REPOSITORY = {
 	},
 	branches: { totalCount: 42 },
 	tags: { totalCount: 900 },
-	pullRequests: { totalCount: 7 }
+	pullRequests: { totalCount: 7 },
+	// Two of the three, so the Review screen has a choice to offer and one it
+	// must not: a method the repository forbids is a 405 waiting to happen.
+	mergeCommitAllowed: true,
+	squashMergeAllowed: true,
+	rebaseMergeAllowed: false
 };
 
 /** Mode arrives as an integer: 16384 is 040000, 33188 is 100644. */
@@ -383,6 +388,19 @@ const COMPILER_PATCH = [
 	' export function compile(source, options = {}) {'
 ].join('\n');
 
+/**
+ * One line replaced by one line, differing in one word. The case the sign
+ * column cannot answer: both rows are marked, and *where* on them the change
+ * is has to come from the word-level pass.
+ */
+const RENAMED_IMPORT_PATCH = [
+	'@@ -1,4 +1,4 @@',
+	' <script>',
+	"-	import { tidy } from './tidier.js';",
+	"+	import { tidy } from './tidy.js';",
+	' </script>'
+].join('\n');
+
 /** Past any sane render budget, which is the point. */
 const BIG_PATCH = [
 	'@@ -1,2000 +1,2000 @@',
@@ -428,6 +446,19 @@ const PATCHES: Record<number, DiffFileStub[]> = {
 			additions: 900,
 			deletions: 20,
 			patch: BIG_PATCH
+		}
+	],
+	// Deliberately the oldest structured commit, which is behind every range the
+	// "since your last visit" tests measure from: a comparison's file list is
+	// built out of this table, and a patch inside one of those ranges would put
+	// a dot on a row those tests assert has none.
+	100: [
+		{
+			filename: 'src/App.svelte',
+			status: 'modified',
+			additions: 1,
+			deletions: 1,
+			patch: RENAMED_IMPORT_PATCH
 		}
 	]
 };
@@ -1174,6 +1205,13 @@ interface Stub {
 	readonly repos: Record<string, number>;
 	/** The palette's path index, per revision. One request, or it is a fan-out. */
 	readonly paths: Record<string, number>;
+	/**
+	 * The one write the client makes, per `number:method`. A merge is not a read
+	 * and must not be replayed, deduplicated or retried, so the count is the
+	 * assertion: two clicks on an armed button are one PUT, and a cancelled one
+	 * is none.
+	 */
+	readonly merges: Record<string, number>;
 	/** Move a pull request's head, as a push does. */
 	push(number: number, oid: string): void;
 	/**
@@ -1208,6 +1246,7 @@ async function signIn(page: Page): Promise<Stub> {
 	const owners: Record<string, number> = {};
 	const repos: Record<string, number> = {};
 	const paths: Record<string, number> = {};
+	const merges: Record<string, number> = {};
 
 	/**
 	 * The head a pull request currently reports. Mutable so a test can push to a
@@ -1215,6 +1254,13 @@ async function signIn(page: Page): Promise<Stub> {
 	 * not also the current one.
 	 */
 	const heads = new Map(PULLS.map((entry) => [entry.number, entry.headOid]));
+
+	/**
+	 * What has been merged in this session. GitHub is the only thing that knows
+	 * a pull request landed, and the screen believes it only after re-reading —
+	 * so the stub has to change its own answer, exactly as GitHub would.
+	 */
+	const merged = new Set<number>();
 
 	const handlers: Record<string, Handler> = {
 		Viewer: (route) => json(route, { data: { viewer: VIEWER, rateLimit: rateLimit(4999) } }),
@@ -1456,10 +1502,12 @@ async function signIn(page: Page): Promise<Stub> {
 			pull[String(number)] = (pull[String(number)] ?? 0) + 1;
 
 			const found = BY_NUMBER.get(number);
+			const state = found && merged.has(number) ? ({ ...found, state: 'MERGED' } as const) : found;
+
 			return json(route, {
 				data: {
 					repository: {
-						pullRequest: found ? pullDetailNode(found, heads.get(number) ?? found.headOid) : null
+						pullRequest: state ? pullDetailNode(state, heads.get(number) ?? state.headOid) : null
 					},
 					rateLimit: rateLimit(4990)
 				}
@@ -1525,6 +1573,34 @@ async function signIn(page: Page): Promise<Stub> {
 		});
 	});
 
+	// The one write. GitHub refuses with a 409 when the `sha` sent is not the
+	// head any more, and the stub does the same — that guard is the reason the
+	// head is sent at all, so it is the one the test can actually turn on.
+	await page.route(/\/repos\/[^/]+\/[^/]+\/pulls\/\d+\/merge$/, async (route) => {
+		const number = Number(new URL(route.request().url()).pathname.split('/').at(-2));
+		const body = JSON.parse(route.request().postData() ?? '{}') as {
+			merge_method?: string;
+			sha?: string;
+		};
+
+		merges[`${number}:${body.merge_method}`] = (merges[`${number}:${body.merge_method}`] ?? 0) + 1;
+
+		const head = heads.get(number);
+		if (body.sha && head && body.sha !== head) {
+			await route.fulfill({
+				status: 409,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					message: 'Head branch was modified. Review and try the merge again.'
+				})
+			});
+			return;
+		}
+
+		merged.add(number);
+		await json(route, { sha: sha(109), merged: true, message: 'Pull Request successfully merged' });
+	});
+
 	await page.route(GRAPHQL, async (route) => {
 		const { operationName = '', variables = {} } = bodyOf(route);
 		calls[operationName] = (calls[operationName] ?? 0) + 1;
@@ -1558,6 +1634,7 @@ async function signIn(page: Page): Promise<Stub> {
 		owners,
 		repos,
 		paths,
+		merges,
 		push(number, oid) {
 			heads.set(number, oid);
 		},
@@ -4241,4 +4318,102 @@ test('the pointer moves the cursor, and only when it actually moves', async ({ p
 	await page.mouse.move((box?.x ?? 0) + 12, (box?.y ?? 0) + 6);
 	await expect(third).toHaveAttribute('aria-selected', 'true');
 	await expect(options.first()).toHaveAttribute('aria-selected', 'false');
+});
+
+/* ------------------------------------------- Reading a diff, and landing it -- */
+
+test('a replaced line says which words changed, not merely that it changed', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/sveltejs/svelte/commit/${sha(100)}`);
+
+	await expect(page.getByRole('heading', { name: 'split the tidier out' })).toBeVisible();
+
+	// One removal, one addition, and the sign column still says which is which.
+	const removed = page.locator('.lrow.del');
+	const added = page.locator('.lrow.add');
+	await expect(removed.locator('.sign')).toHaveText('−');
+	await expect(added.locator('.sign')).toHaveText('+');
+
+	// The whole point: the emphasis is the module that was renamed, not the
+	// thirty characters either side of it that did not move.
+	await expect(removed.locator('.w')).toHaveText('tidier');
+	await expect(added.locator('.w')).toHaveText('tidy');
+});
+
+test('a line with no counterpart is marked whole, and a moved one not at all', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/sveltejs/svelte/commit/${INLINE}`);
+
+	// This patch removes a line and adds it back unchanged beside a new one. A
+	// move is not an edit, and there is nothing on either row to point at — so
+	// the row tint says all there is to say and no word is singled out.
+	await expect(page.locator('.lrow.del')).toContainText("import { parse } from './parse.js';");
+	await expect(page.locator('.lrow .w')).toHaveCount(0);
+});
+
+test('the merge button lands a pull request and turns purple when it has', async ({ page }) => {
+	const stub = await signIn(page);
+	await openPull(page, 7);
+
+	// Only the methods this repository allows. Offering rebase here would be
+	// offering a 405.
+	await expect(page.getByRole('button', { name: 'Merge commit' })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Squash and merge' })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Rebase and merge' })).toHaveCount(0);
+
+	// Arming is not merging, and it can be taken back. Nothing has been sent.
+	await page.getByRole('button', { name: 'Merge pull request' }).click();
+	await expect(page.getByRole('button', { name: 'Confirm merge' })).toBeVisible();
+	await page.getByRole('button', { name: 'Cancel' }).click();
+	expect(stub.merges).toEqual({});
+
+	await page.getByRole('button', { name: 'Merge pull request' }).click();
+	await page.getByRole('button', { name: 'Confirm merge' }).click();
+
+	// One click, one write, with the head that was on screen attached to it.
+	await expect.poll(() => stub.merges).toEqual({ '7:merge': 1 });
+
+	// And the screen believes GitHub rather than itself: `MERGED` arrived from
+	// a re-read, not from us patching the copy we already had.
+	await expect(page.locator('.pill.merged')).toHaveText('Merged');
+	await expect(page.getByRole('status').filter({ hasText: 'Merged' })).toContainText(
+		'parser-rewrite landed in main'
+	);
+	await expect(page.getByRole('button', { name: 'Merge pull request' })).toHaveCount(0);
+});
+
+test('a pull request with conflicts offers no merge, and says what is wrong', async ({ page }) => {
+	await signIn(page);
+	await openPull(page, 6);
+
+	await expect(page.getByText('This does not merge cleanly into main.')).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Merge pull request' })).toHaveCount(0);
+});
+
+test('a branch that moved under you is refused rather than merged', async ({ page }) => {
+	const stub = await signIn(page);
+	await openPull(page, 7);
+
+	// Somebody pushed while it was being read. What is on screen is a diff of a
+	// commit that is no longer the head, and merging it would land work nobody
+	// looked at — so the head goes with the request and GitHub refuses.
+	stub.push(7, sha(109));
+
+	await page.getByRole('button', { name: 'Merge pull request' }).click();
+	await page.getByRole('button', { name: 'Confirm merge' }).click();
+
+	await expect(page.getByRole('alert')).toContainText('Head branch was modified');
+	await expect(page.getByRole('button', { name: 'Merge pull request' })).toBeVisible();
+	await expect(page.locator('.pill.merged')).toHaveCount(0);
+});
+
+test('a pull request that already landed says so and offers nothing to do', async ({ page }) => {
+	await signIn(page);
+	await openPull(page, 5);
+
+	await expect(page.locator('.pill.merged')).toHaveText('Merged');
+	await expect(page.getByRole('status').filter({ hasText: 'Merged' })).toContainText(
+		'docs landed in main'
+	);
+	await expect(page.getByRole('button', { name: 'Merge pull request' })).toHaveCount(0);
 });

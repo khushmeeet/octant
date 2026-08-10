@@ -1,6 +1,7 @@
 import { document } from './document';
 import { fail } from './errors';
 import { query, type QueryOptions, type QueryResult } from './graphql';
+import type { MergeMethod } from './rest';
 import type { RepoRef } from './types';
 
 /**
@@ -33,6 +34,9 @@ interface RepoNode {
 	branches: { totalCount: number };
 	tags: { totalCount: number };
 	pullRequests: { totalCount: number };
+	mergeCommitAllowed: boolean | null;
+	squashMergeAllowed: boolean | null;
+	rebaseMergeAllowed: boolean | null;
 }
 
 export const REPO = document<{ repository: RepoNode | null }, RepoRef>({
@@ -63,6 +67,9 @@ export const REPO = document<{ repository: RepoNode | null }, RepoRef>({
 		branches: refs(refPrefix: "refs/heads/") { totalCount }
 		tags: refs(refPrefix: "refs/tags/") { totalCount }
 		pullRequests(states: OPEN) { totalCount }
+		mergeCommitAllowed
+		squashMergeAllowed
+		rebaseMergeAllowed
 	}`
 });
 
@@ -90,6 +97,13 @@ export interface RepoSummary {
 	defaultBranch: string | null;
 	head: HeadCommit | null;
 	counts: { commits: number; branches: number; tags: number; openPullRequests: number };
+	/**
+	 * Which ways this repository will let a pull request land, in the order the
+	 * Review screen offers them. A repository setting rather than a permission:
+	 * an empty list means every method is switched off, which GitHub allows and
+	 * which is worth saying out loud rather than discovering from a 405.
+	 */
+	mergeMethods: MergeMethod[];
 }
 
 export async function getRepo(
@@ -148,6 +162,21 @@ function summarise(node: RepoNode): RepoSummary {
 			branches: node.branches.totalCount,
 			tags: node.tags.totalCount,
 			openPullRequests: node.pullRequests.totalCount
-		}
+		},
+		mergeMethods: methods(node)
 	};
+}
+
+/**
+ * A field GitHub returned empty — an old cache entry, or a partial response —
+ * is read as allowed, so a missing answer offers the default rather than
+ * hiding the button. GitHub is the one that decides; sending a method it
+ * forbids costs a 405 with its own sentence in it.
+ */
+function methods(node: RepoNode): MergeMethod[] {
+	const out: MergeMethod[] = [];
+	if (node.mergeCommitAllowed !== false) out.push('merge');
+	if (node.squashMergeAllowed !== false) out.push('squash');
+	if (node.rebaseMergeAllowed !== false) out.push('rebase');
+	return out;
 }

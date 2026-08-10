@@ -5,12 +5,22 @@
 	import VirtualRows from '$lib/ui/VirtualRows.svelte';
 	import DeltaBar from '$lib/ui/DeltaBar.svelte';
 	import { count } from '$lib/ui/format';
+	import DiffText from './DiffText.svelte';
 	import { noteKey, type DiffNote } from './notes';
 	import { parsePatch, type DiffLine } from './parse';
 
 	/**
 	 * A unified diff, virtualised — DESIGN.md §5: a sign column, row-level tint
 	 * from `--ok-bg` / `--no-bg`, and hunk headers on `--side`.
+	 *
+	 * **The tint runs the whole row, and the words that changed are brighter
+	 * still.** A sign is one character in a 14px column, and reading a diff by
+	 * it means reading every line to find the handful that moved. So the green
+	 * and the red run from the line numbers to the end of the source, and where
+	 * a removed line has a counterpart on the other side, the runs of text that
+	 * actually differ take a second layer of the same colour — which is what
+	 * turns "this line changed" into "this word changed" without a second read.
+	 * `words.ts` decides which; this only paints them.
 	 *
 	 * Every file in the commit is flattened into **one** list of fixed-height
 	 * rows — file headers, hunk headers and lines alike — rather than a
@@ -220,7 +230,7 @@
 					<span class="sign" aria-hidden={line.kind === 'ctx' ? 'true' : undefined}>
 						{SIGN[line.kind]}
 					</span>
-					<code class="src">{line.text}</code>
+					<code class="src"><DiffText text={line.text} words={line.words} /></code>
 					{#if note && key}
 						<button
 							class="note {note.tone}"
@@ -398,8 +408,19 @@
 		white-space: pre;
 	}
 
+	/*
+	 * A changed row is tinted end to end. The source takes the translucent fill
+	 * over `--panel`; the gutters and the sign, which are opaque because they
+	 * are sticky over the source, take the same colour already flattened. The
+	 * two must be kept in step — see `--ok-row` in `app.css`.
+	 */
 	.add .src {
-		background: var(--ok-bg);
+		background: var(--ok-line);
+	}
+
+	.add .ln,
+	.add .sign {
+		background: var(--ok-row);
 	}
 
 	.add .sign {
@@ -407,11 +428,26 @@
 	}
 
 	.del .src {
-		background: var(--no-bg);
+		background: var(--no-line);
+	}
+
+	.del .ln,
+	.del .sign {
+		background: var(--no-row);
 	}
 
 	.del .sign {
 		color: var(--no);
+	}
+
+	/* Which of the two the word-level emphasis is drawn in. `DiffText` reads it
+	   and never learns which side of the diff it is rendering. */
+	.add {
+		--diff-word: var(--ok-word);
+	}
+
+	.del {
+		--diff-word: var(--no-word);
 	}
 
 	.note .src {

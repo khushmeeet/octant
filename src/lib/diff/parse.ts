@@ -1,3 +1,5 @@
+import { refineWords, type Span } from './words';
+
 /**
  * Unified patches, parsed — PLAN.md Phase 5's diff, and the piece Phase 7 will
  * reuse for pull requests.
@@ -12,6 +14,11 @@
  * says where each side starts and the signs say which side each line advances,
  * so counting once on the way in gives the viewer two numbers per row and no
  * arithmetic in the scroll path.
+ *
+ * Word-level spans are resolved here for the same reason, and they are the one
+ * thing on a `DiffLine` a patch does not literally contain — see `words.ts`.
+ * It runs per hunk rather than per patch because a hunk is the largest unit
+ * whose lines can possibly be each other's counterparts.
  */
 
 export type DiffLineKind =
@@ -31,6 +38,12 @@ export interface DiffLine {
 	old: number | null;
 	/** 1-based line in the new file, `null` on a deletion. */
 	new: number | null;
+	/**
+	 * Where on this line the change actually is, when the line has a
+	 * counterpart on the other side. Absent on a line that is wholly new,
+	 * wholly gone, or whose counterpart was too unlike it to be one.
+	 */
+	words?: readonly Span[];
 }
 
 export interface DiffHunk {
@@ -80,6 +93,8 @@ export function parsePatch(patch: string): DiffHunk[] {
 			current.lines.push({ kind: 'note', text: text.trim(), old: null, new: null });
 		else current.lines.push({ kind: 'ctx', text, old: oldLine++, new: newLine++ });
 	}
+
+	for (const hunk of hunks) refineWords(hunk.lines);
 
 	return hunks;
 }

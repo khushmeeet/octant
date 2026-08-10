@@ -12,8 +12,12 @@
 		 * first screen with either, which is why the tone arrives with it rather
 		 * than in Phase 0 — a colour with no meaning in use is a colour that
 		 * drifts into decoration.
+		 *
+		 * `merged` is purple, and it means exactly one thing: this pull request
+		 * landed. It used to be `accent`, which reads "this concerns you" — and
+		 * a merged pull request is the one that no longer does.
 		 */
-		tone?: 'default' | 'accent' | 'ok' | 'no' | 'warn' | 'plain';
+		tone?: 'default' | 'accent' | 'merged' | 'ok' | 'no' | 'warn' | 'plain';
 		mono?: boolean;
 		title?: string;
 		onclick?: () => void;
@@ -59,6 +63,12 @@
 		background: var(--acc-bg);
 		border-color: transparent;
 		color: var(--acc-tx);
+	}
+
+	.merged {
+		background: var(--mg-bg);
+		border-color: transparent;
+		color: var(--mg);
 	}
 
 	.ok {
