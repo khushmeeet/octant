@@ -38,6 +38,7 @@
 	import { ago, agoAt, count } from '$lib/ui/format';
 	import type { Crumb, NavHead, NavItem, PanelEntry, Verb } from '$lib/ui/types';
 	import { reposSeen } from '$lib/visits/repos.svelte';
+	import { inboxSeen } from '$lib/visits/reviews.svelte';
 
 	/**
 	 * The home screen — where the app opens.
@@ -50,15 +51,17 @@
 	 * neither, and a person who has just arrived is exactly the person who does
 	 * not yet know what changed while they were away.
 	 *
-	 * So: two lists, one screen, one round trip each and no per-row read on
-	 * either. Pull requests first, because they are the half with a deadline; the
-	 * repositories under them, ordered by what was pushed to rather than
-	 * alphabetically, so the top of the list is where the work is.
+	 * So: two lists, one round trip each and no per-row read on either. **One of
+	 * them at a time, and the pull requests by default** — they are the half with
+	 * a deadline, and a landing screen either answers a question or makes you
+	 * scroll past one to reach the other. The repositories are the second view,
+	 * ordered by what was pushed to rather than alphabetically, so the top of the
+	 * list is where the work is.
 	 *
 	 * **Nothing about this screen is a repository**, which is the one thing that
 	 * makes it different from every other screen in the app: the sidebar's four
 	 * primitives are questions about a repository and have nothing to point at
-	 * here, so it brings its own three destinations, and the right panel's fixed
+	 * here, so it brings its own two destinations, and the right panel's fixed
 	 * three blocks are about the account instead.
 	 *
 	 * Typing `owner/name` into the filter still opens anything the token can read.
@@ -83,11 +86,14 @@
 	const inbox = resource(() => (login ? GitHubSource.getViewerPulls(login) : null));
 
 	/**
-	 * The delta, and it costs nothing: every repository screen writes a record
-	 * when you look at it, the list carries every row's `pushedAt`, and one prefix
-	 * scan turns the pair into "this moved while you were away".
+	 * The delta, one per list, and neither costs a request. A repository screen
+	 * writes a record when you look at it and the list carries `pushedAt`; the
+	 * Review screen writes one when you mark a review done and the list carries
+	 * the head SHA. Two prefix scans, each run once, and the panel's first block
+	 * is about whichever list is on screen.
 	 */
 	const seen = reposSeen();
+	const reviewed = inboxSeen();
 
 	function movedSince(repo: ViewerRepo): boolean {
 		return seen.stateOf(repo.nameWithOwner, repo.pushedAt) === 'moved';
@@ -96,14 +102,13 @@
 	/* --------------------------------------------------------------- rows -- */
 
 	/**
-	 * One list for the keyboard, two on screen. `j` and `k` walk everything the
-	 * pointer can click and stop at neither section's edge, which is the same
-	 * rule the tree's `..` row follows.
+	 * What the keyboard walks. The view decides which list it is, and the address
+	 * row — a repository named in the filter that is on neither list — rides above
+	 * whichever one that is, because "take me there" is not a search result.
 	 */
 	type Row =
 		| { kind: 'pull'; pull: InboxPull }
 		| { kind: 'repo'; repo: ViewerRepo }
-		/** Not on any list of ours: a repository named in the filter. */
 		| { kind: 'direct'; ref: RepoRef };
 
 	let query = $state('');
@@ -111,8 +116,8 @@
 
 	const needle = $derived(query.trim().toLowerCase());
 
-	const showPulls = $derived(view === 'all' || view === 'pulls');
-	const showRepos = $derived(view === 'all' || view === 'repos');
+	const showPulls = $derived(view === 'pulls');
+	const showRepos = $derived(view === 'repos');
 
 	function matchesPull(entry: InboxPull, text: string): boolean {
 		if (!text) return true;
@@ -139,40 +144,38 @@
 	 * arrive here.
 	 */
 	const direct = $derived.by<RepoRef | null>(() => {
-		if (!showRepos || !needle) return null;
+		if (!needle) return null;
 
 		const typed = query.trim().replace(/^https?:\/\/github\.com\//i, '');
 		const parsed = parseRepoRef(typed.split(/[?#]/)[0].split('/').slice(0, 2).join('/'));
 		if (!parsed) return null;
 
-		// Already on the list below, where it carries more than a name does.
+		// Already on the repository list, where the row carries more than a name
+		// does. On the pull request view there is no such list to defer to.
 		const slug = `${parsed.owner}/${parsed.name}`.toLowerCase();
-		if (walk.items.some((entry) => entry.nameWithOwner.toLowerCase() === slug)) return null;
+		if (showRepos && walk.items.some((entry) => entry.nameWithOwner.toLowerCase() === slug)) {
+			return null;
+		}
 
 		return parsed;
 	});
 
-	const pullRows = $derived.by<Row[]>(() =>
+	/** The list the view asks for, filtered. One of the two, never both. */
+	const listRows = $derived.by<Row[]>(() =>
 		showPulls
 			? (inbox.data?.items ?? [])
 					.filter((entry) => matchesPull(entry, needle))
 					.map((pull) => ({ kind: 'pull', pull }) as const)
-			: []
+			: walk.items
+					.filter((entry) => matchesRepo(entry, needle))
+					.map((repo) => ({ kind: 'repo', repo }) as const)
 	);
 
-	const repoRows = $derived.by<Row[]>(() => {
-		if (!showRepos) return [];
+	/** What the cursor walks: the address row, if there is one, and then the list. */
+	const rows = $derived<Row[]>(direct ? [{ kind: 'direct', ref: direct }, ...listRows] : listRows);
 
-		const rows: Row[] = walk.items
-			.filter((entry) => matchesRepo(entry, needle))
-			.map((repo) => ({ kind: 'repo', repo }) as const);
-
-		if (direct) rows.unshift({ kind: 'direct', ref: direct });
-		return rows;
-	});
-
-	/** What the cursor walks. The two sections in the order they are rendered. */
-	const rows = $derived([...pullRows, ...repoRows]);
+	/** Where the list starts within `rows`, which is what `reveal` is measured in. */
+	const listFrom = $derived(direct ? 1 : 0);
 
 	/** Unset until the keyboard or the pointer moves it — as everywhere else. */
 	let cursor = $state(-1);
@@ -392,31 +395,54 @@
 		title: viewer?.name ?? login ?? 'Your account'
 	});
 
+	/** Two destinations, in the order the screen presents them. */
 	const items = $derived<NavItem[]>([
-		{ id: 'all', label: 'All', icon: 'code', count: null, href: homeHref() },
+		{
+			id: 'pulls',
+			label: 'Pull requests',
+			icon: 'pr',
+			count: inbox.data ? inbox.data.items.length : null,
+			href: homeHref()
+		},
 		{
 			id: 'repos',
 			label: 'Repositories',
 			icon: 'folder',
 			count: walk.total,
 			href: homeHref({ view: 'repos' })
-		},
-		{
-			id: 'pulls',
-			label: 'Pull requests',
-			icon: 'pr',
-			count: inbox.data ? inbox.data.items.length : null,
-			href: homeHref({ view: 'pulls' })
 		}
 	]);
 
 	const requested = $derived((inbox.data?.items ?? []).filter((entry) => entry.requested));
+
 	const moved = $derived(walk.items.filter(movedSince));
 	const unseen = $derived(
 		walk.items.filter((entry) => seen.stateOf(entry.nameWithOwner, entry.pushedAt) === 'unseen')
 	);
 
+	/** The same three states as the Review screen's, across every repository. */
+	const pullStates = $derived(
+		(inbox.data?.items ?? []).map((entry) =>
+			reviewed.stateOf(entry.repo, entry.number, entry.headRefOid)
+		)
+	);
+
+	/** The panel's first block is about the list on screen, and only that one. */
 	const visit = $derived.by<PanelEntry[]>(() => {
+		if (showPulls) {
+			if (!reviewed.ready) return [{ key: 'Reviewed before', value: '—' }];
+
+			const movedSince = pullStates.filter((state) => state === 'moved').length;
+			return [
+				{ key: 'Reviewed before', value: count(reviewed.count) },
+				{ key: 'Moved since', value: count(movedSince), accent: movedSince > 0 },
+				{
+					key: 'Never opened',
+					value: count(pullStates.filter((state) => state === 'unseen').length)
+				}
+			];
+		}
+
 		if (!seen.ready) return [{ key: 'Opened before', value: '—' }];
 
 		return [
@@ -465,7 +491,7 @@
 		return [
 			{ key: 'Account', value: login ?? '—', mono: true },
 			{ key: 'Repositories', value: walk.total === null ? '—' : count(walk.total) },
-			{ key: 'Showing', value: view === 'all' ? 'everything' : view }
+			{ key: 'Showing', value: view === 'pulls' ? 'pull requests' : 'repositories' }
 		];
 	});
 
@@ -485,6 +511,29 @@
 				value: count(walk.items.filter((entry) => entry.openPullRequests > 0).length)
 			}
 		];
+	});
+
+	/**
+	 * What the bar says about the list on screen. A list that ends without saying
+	 * whether it ended is the dishonest kind of paging — `query.ts` on
+	 * `totalCount` — so the repositories always name the total they are part of,
+	 * and a filter says what it is hiding on top of that.
+	 */
+	const tally = $derived.by<string>(() => {
+		if (showPulls) {
+			const all = inbox.data?.items.length;
+			if (all === undefined) return '';
+			return listRows.length === all
+				? `${count(all)} in flight`
+				: `${count(listRows.length)} of ${count(all)} in flight`;
+		}
+
+		if (walk.total === null) return '';
+
+		const loaded = `${count(walk.items.length)} of ${count(walk.total)} repositories`;
+		return listRows.length === walk.items.length
+			? loaded
+			: `${count(listRows.length)} of ${count(walk.items.length)} loaded · ${loaded}`;
 	});
 
 	/** The list on screen; a revalidation that failed behind it is a warning. */
@@ -520,7 +569,8 @@
 {#snippet pullRow(row: Row, index: number)}
 	{#if row.kind === 'pull'}
 		{@const entry = row.pull}
-		{@const on = index === cursor}
+		{@const at = index + listFrom}
+		{@const on = at === cursor}
 		<!-- Selection is not carried by colour alone — DESIGN.md §9. -->
 		<a
 			class="row"
@@ -528,7 +578,7 @@
 			aria-current={on ? 'true' : undefined}
 			href={pullHref(entry.repo, entry.number)}
 			title="{entry.nameWithOwner}#{entry.number} {entry.title}"
-			onclick={(event) => pick(event, index)}
+			onclick={(event) => pick(event, at)}
 			onpointerenter={() => warm(row)}
 		>
 			<span class="where mono">{entry.nameWithOwner}</span>
@@ -569,31 +619,17 @@
 {/snippet}
 
 {#snippet repoRow(row: Row, index: number)}
-	{@const on = index + pullRows.length === cursor}
-	{#if row.kind === 'direct'}
-		<a
-			class="row direct"
-			class:sel={on}
-			aria-current={on ? 'true' : undefined}
-			href={repoHref(row.ref)}
-			title="Open {row.ref.owner}/{row.ref.name}"
-			onclick={(event) => pick(event, index + pullRows.length)}
-		>
-			<Icon name="link" />
-			<span class="title">
-				Open <span class="mono">{row.ref.owner}/{row.ref.name}</span>
-			</span>
-			<span class="age">not on your list</span>
-		</a>
-	{:else if row.kind === 'repo'}
+	{#if row.kind === 'repo'}
 		{@const entry = row.repo}
+		{@const at = index + listFrom}
+		{@const on = at === cursor}
 		<a
 			class="row"
 			class:sel={on}
 			aria-current={on ? 'true' : undefined}
 			href={repoHref(entry)}
 			title={entry.description ?? entry.nameWithOwner}
-			onclick={(event) => pick(event, index + pullRows.length)}
+			onclick={(event) => pick(event, at)}
 			onpointerenter={() => warm(row)}
 		>
 			{#if movedSince(entry)}
@@ -649,20 +685,31 @@
 				autocorrect="off"
 				spellcheck="false"
 			/>
-			<span class="tally">
-				{#if walk.total !== null}
-					<!-- A list that ends without saying whether it ended is the
-					     dishonest kind of paging — `query.ts` on `totalCount`. -->
-					{count(walk.items.length)} of {count(walk.total)} repositories
-				{/if}
-				{#if inbox.data}
-					· {count(inbox.data.items.length)} in flight
-				{/if}
-			</span>
+			<span class="tally">{tally}</span>
 		</div>
 
+		{#if direct}
+			<!-- Above the list rather than in it: this is not a result, it is an
+			     address. It is row zero, so `enter` opens it without a keystroke. -->
+			<nav class="list" aria-label="Go to a repository">
+				<a
+					class="row direct"
+					class:sel={cursor === 0}
+					aria-current={cursor === 0 ? 'true' : undefined}
+					href={repoHref(direct)}
+					title="Open {direct.owner}/{direct.name}"
+					onclick={(event) => pick(event, 0)}
+				>
+					<Icon name="link" />
+					<span class="title">
+						Open <span class="mono">{direct.owner}/{direct.name}</span>
+					</span>
+					<span class="hint">anything this token can read</span>
+				</a>
+			</nav>
+		{/if}
+
 		{#if showPulls}
-			<h2 class="sec">In flight</h2>
 			<div class="cols" aria-hidden="true">
 				<span class="c-where">Repository</span>
 				<span class="c-num">#</span>
@@ -676,9 +723,9 @@
 
 			<nav class="list" aria-label="Open pull requests">
 				<VirtualRows
-					items={pullRows}
+					items={listRows}
 					rowHeight={32}
-					reveal={cursor < pullRows.length ? cursor : null}
+					reveal={cursor >= listFrom ? cursor - listFrom : null}
 					revealMargin={28}
 					row={pullRow}
 				>
@@ -695,10 +742,14 @@
 					{/snippet}
 				</VirtualRows>
 			</nav>
-		{/if}
 
-		{#if showRepos}
-			<h2 class="sec">Repositories</h2>
+			{#if inbox.data?.truncated}
+				<p class="note">
+					Showing the most recently updated of each. The rest are on each repository's own Review
+					screen.
+				</p>
+			{/if}
+		{:else}
 			<div class="cols" aria-hidden="true">
 				<span class="c-flag"></span>
 				<span class="c-name">Repository</span>
@@ -710,9 +761,9 @@
 
 			<nav class="list" aria-label="Repositories">
 				<VirtualRows
-					items={repoRows}
+					items={listRows}
 					rowHeight={32}
-					reveal={cursor >= pullRows.length ? cursor - pullRows.length : null}
+					reveal={cursor >= listFrom ? cursor - listFrom : null}
 					revealMargin={28}
 					row={repoRow}
 				>
@@ -738,13 +789,6 @@
 						: `Load more · ${count(Math.max(0, (walk.total ?? 0) - walk.items.length))} left`}
 				</button>
 			{/if}
-		{/if}
-
-		{#if inbox.data?.truncated && showPulls}
-			<p class="note">
-				Showing the most recently updated of each. The rest are on each repository's own Review
-				screen.
-			</p>
 		{/if}
 	{/if}
 </Shell>
@@ -983,8 +1027,12 @@
 		text-align: right;
 	}
 
-	.direct .age {
-		width: auto;
+	/* The address row's trailing note. Not a column — there is one row of it. */
+	.hint {
+		margin-left: auto;
+		font-size: 11px;
+		color: var(--tx3);
+		flex: none;
 	}
 
 	.more {

@@ -1820,7 +1820,8 @@ flight that have your name on them, and the `owner/name` text field is gone. ✅
 | `store/keys.ts` | `accountKey` — `kind:@login[:id]`, a third address shape |
 | `store/policy.ts` | `FRESHNESS.repos` (5 min) and `FRESHNESS.inbox` (1 min) |
 | `visits/repos.svelte.ts` | new — which repositories moved while you were away, from one prefix scan |
-| `visits/ids.ts` | `REPO_VISIT_PREFIX`, `repoSlugFrom` — the scan's address |
+| `visits/ids.ts` | `REPO_VISIT_PREFIX`, `repoSlugFrom`, `PULL_VISIT_PREFIX`, `isPullVisitId` |
+| `visits/reviews.svelte.ts` | `inboxSeen()` — the review delta across every repository, from the same scan |
 | `home/HomeScreen.svelte` | new — the screen |
 | `ui/Sidebar.svelte` | takes a `head` and `items` for a screen that is not about a repository; `section={null}` drops the contextual block |
 | `nav/recent.svelte.ts` | now only the tick's pinned set; `forget` had no caller left and went |
@@ -1838,9 +1839,12 @@ six repository screens. And a fan-out is a request per row — `viewer.repositor
 is one query however many repositories come back, exactly like the pull request
 list that has been shipping since Phase 7.
 
-**Pull requests above repositories**, because they are the half with a
-deadline. The repositories are ordered by `pushedAt` rather than by name, so
-the top of the list is where the work is and the alphabet stays out of it.
+**Pull requests are the screen; the repositories are the other view.** They
+are the half with a deadline, so they are what `/` shows. The first cut stacked
+both lists and defaulted to showing them together, which meant scrolling past
+the answer to find the other one. The repositories are ordered by `pushedAt`
+rather than by name, so the top of that list is where the work is and the
+alphabet stays out of it.
 
 **The in-flight list is two searches, not a connection, and that is the one
 real trade in this change.** `viewer.pullRequests(states: OPEN)` returns what
@@ -1873,18 +1877,28 @@ shipped. A screen above the repository now supplies its own badge and its own
 items, and the four are back to meaning what they say.
 
 **Below them there is nothing, and that is the finished shape.** The first cut
-put the old entry screen's `Recent` list in the contextual section and gave the
-header two verbs, `Pull requests` and `Repositories`, for when no row was
-selected. Both went, and for the same reason the verb row went in the chrome
-pass: they were the screen repeating itself. The two views are sidebar items
-three inches above where the verbs were, and the recent list was a worse copy
-of the list filling the screen beside it — GitHub's own, ordered by what was
-pushed to, with the dots saying which ones moved. So the section is absent
-rather than empty (a heading over nothing reads as a section that failed to
-load), and with no row selected the header carries pills and no verbs, because
-there is no object to carry them. `recent` itself stays: `sync/tick.ts` reads
-the top three as the pinned set, and PLAN.md Phase 9 wants it as a palette
-group.
+put the old entry screen's `Recent` list in the contextual section, gave the
+header two verbs — `Pull requests` and `Repositories` — for when no row was
+selected, and offered a third view that showed both lists at once. All three
+went, and for the same reason the verb row went in the chrome pass: they were
+the screen repeating itself. The two views are sidebar items three inches above
+where the verbs were; the recent list was a worse copy of the list filling the
+screen beside it — GitHub's own, ordered by what was pushed to, with the dots
+saying which ones moved; and a combined view is a screen that answers neither
+question first. So the section is absent rather than empty (a heading over
+nothing reads as a section that failed to load), the section headings above the
+tables went with it (the sidebar already says which list you are on), and with
+no row selected the header carries pills and no verbs. `recent` itself stays:
+`sync/tick.ts` reads the top three as the pinned set, and PLAN.md Phase 9 wants
+it as a palette group.
+
+**The panel's first block follows the view.** On the repositories it is the
+`pushedAt` comparison; on the pull requests it is the *review* records — the
+same three states the Review screen shows, read across every repository at once
+rather than one. `visits` ids are hierarchical precisely for that: `pull:` is
+the whole tree, `pull:owner/name:` is one repository's branch of it, and both
+are one transaction. `reviews.svelte.ts` now serves both callers from one scan;
+the only difference is the key a row is looked up by.
 
 **Typing `owner/name` still works, as a row rather than as a screen.** A
 repository you can read but are not a member of is on no list GitHub will hand

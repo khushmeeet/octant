@@ -43,13 +43,19 @@ export function repoSlugFrom(id: string): string {
 	return id.slice(REPO_VISIT_PREFIX.length);
 }
 
+/**
+ * Every pull-request record there is — the home screen's scan, whose list spans
+ * every repository. One transaction rather than one per repository on it.
+ */
+export const PULL_VISIT_PREFIX = 'pull:';
+
 export function pullVisitId(repo: RepoRef, number: number): string {
-	return `pull:${repo.owner}/${repo.name}:${number}`;
+	return `${PULL_VISIT_PREFIX}${repo.owner}/${repo.name}:${number}`;
 }
 
 /** Every pull-request record of one repository. The Review list's prefix scan. */
 export function pullVisitPrefix(repo: RepoRef): string {
-	return `pull:${repo.owner}/${repo.name}:`;
+	return `${PULL_VISIT_PREFIX}${repo.owner}/${repo.name}:`;
 }
 
 /**
@@ -63,10 +69,12 @@ export function fileVisitPrefix(repo: RepoRef, number: number): string {
 }
 
 /**
- * The pull request a `pullVisitPrefix` row belongs to, or `null` if the row is
- * one of its files rather than the pull request itself.
+ * Whether a scanned row is a pull request's own record rather than one of its
+ * files. Asked of the id itself rather than of what is left after a prefix, so
+ * the same test works for a scan of one repository and a scan of all of them.
  */
-export function pullNumberFrom(id: string, prefix: string): number | null {
-	const rest = id.slice(prefix.length);
-	return /^\d+$/.test(rest) ? Number(rest) : null;
+const PULL_VISIT = /^pull:[^/:]+\/[^/:]+:\d+$/;
+
+export function isPullVisitId(id: string): boolean {
+	return PULL_VISIT.test(id);
 }

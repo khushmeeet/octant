@@ -15,7 +15,7 @@ outside the scope below links out.
 
 | Surface | Answers                                    |
 | ------- | ------------------------------------------ |
-| Home    | Which repositories are there, and what needs me? |
+| Home    | What needs me, and which repositories are there? |
 | Tree    | What is this repo, and what just landed?   |
 | Log     | What changed, how big, by whom?            |
 | File    | Who wrote this line and why?               |
@@ -32,9 +32,11 @@ later phase.
 originally ruled the account out along with the rest of GitHub's product and
 opened the app on a text field you typed `owner/name` into. That was wrong in
 the way a login form is wrong: the first question a client of your own
-repositories should answer is which ones there are, and the second is which of
-them needs you today. So the arrival screen lists the repositories the token
-can see and the open pull requests you wrote or have been asked to review.
+repositories should answer is what needs you today, and the second is which
+repositories there are. So the arrival screen lists the open pull requests you
+wrote or have been asked to review, with the repositories the token can see one
+click away — one view at a time, because a landing screen either answers a
+question or makes you scroll past one to reach the other.
 
 Nothing else about the account follows it in. There are no stars, no
 followers, no feed, no notifications inbox, no organisation pages — one list of

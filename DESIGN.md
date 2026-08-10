@@ -146,19 +146,20 @@ section whose heading changes per screen (`Files`, `Symbols`, `Scope`,
 
 The home screen is the one place the four are replaced rather than filled in:
 git's primitives are questions about a repository, and above one they have
-nothing to point at. It shows the account in the badge and three items — All,
-Repositories, Pull requests — which are views of the same address, and no
+nothing to point at. It shows the account in the badge and two items — Pull
+requests, Repositories — which are views of the same address, and no
 contextual section at all. The geography is otherwise unchanged, which is the
 point: badge, items, counts and account sit exactly where they sit on every
 other screen.
 
-**Home** — two tables in one scroller, each with the standard 28px column
-header: `In flight` (pull requests, across every repository, so the row leads
-with the repository name) and `Repositories` (ordered by what was pushed to).
-One filter field above both, which is also where you type `owner/name` to
-open something that is on neither list. With no row selected the header
-carries pills and no verbs: there is no object to carry them, and the two
-views are the sidebar's job.
+**Home** — one table, with the standard 28px column header and no heading
+above it: the sidebar says which of the two you are looking at. Pull requests
+by default, across every repository, so the row leads with the repository
+name; repositories on the other view, ordered by what was pushed to. One
+filter field above, which is also where you type `owner/name` — that offers a
+single row above the table, in either view, because it is an address rather
+than a result. With no row selected the header carries pills and no verbs:
+there is no object to carry them.
 
 **Header** — breadcrumb left; the object's group and then the chrome, right.
 The object's group is its pills (ref, HEAD SHA, state — `Open`, `1 check

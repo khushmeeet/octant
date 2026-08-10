@@ -1503,7 +1503,8 @@ async function signIn(page: Page): Promise<Stub> {
 	await page.goto('/');
 	await page.getByLabel('Personal access token').fill('github_pat_stub');
 	await page.getByRole('button', { name: 'Validate and continue' }).click();
-	await expect(page.getByRole('heading', { name: 'Repositories' })).toBeVisible();
+	// The home screen, on its default view: the pull requests that need you.
+	await expect(page.getByRole('navigation', { name: 'Open pull requests' })).toBeVisible();
 
 	return {
 		calls,
@@ -1554,10 +1555,11 @@ function inboxList(page: Page) {
 	return page.getByRole('navigation', { name: 'Open pull requests' });
 }
 
-/** Land on the home screen with both lists filled in. */
+/** Land on the home screen with the view's list filled in. */
 async function openHome(page: Page, at = '/') {
 	await page.goto(at);
-	await expect(repoList(page).getByRole('link', { name: /sveltejs\/svelte/ })).toBeVisible();
+	const list = at.includes('view=repos') ? repoList(page) : inboxList(page);
+	await expect(list.getByRole('link').first()).toBeVisible();
 }
 
 /**
@@ -3700,35 +3702,12 @@ test('the background tick revalidates the pinned repository without a navigation
 
 /* ---------------------------------------------------- The home screen: you -- */
 
-test('the app opens on your repositories and what is in flight', async ({ page }) => {
+test('the app opens on the pull requests that need you', async ({ page }) => {
 	const stub = await signIn(page);
 
-	// Two lists, and the account rather than a repository above them.
-	await expect(page.getByRole('heading', { name: 'In flight' })).toBeVisible();
-	await expect(page.getByRole('heading', { name: 'Repositories' })).toBeVisible();
+	// The default view, and the account rather than a repository above it.
+	await expect(page).toHaveURL('/');
 	await expect(page.getByRole('navigation', { name: 'Primary' })).toContainText('octant-user');
-
-	// Nothing is selected, so the header carries pills and no verbs — there is no
-	// object to carry them, and the two views are the sidebar's three items.
-	await expect(page.getByRole('banner')).toContainText('52 repositories');
-	await expect(
-		page.getByRole('banner').getByRole('link', { name: /^(Repositories|Pull requests)$/ })
-	).toHaveCount(0);
-
-	// The sidebar's three items are the whole of it: no contextual section, and
-	// no heading standing over one.
-	const primary = page.getByRole('navigation', { name: 'Primary' });
-	// The badge and the three views, and nothing under them.
-	await expect(primary.getByRole('link')).toHaveCount(4);
-	await expect(primary).not.toContainText('Recent');
-
-	// Ordered by what was pushed to, so the top of the list is where the work is.
-	const rows = repoList(page).getByRole('link');
-	await expect(rows.nth(0)).toContainText('sveltejs/svelte');
-	await expect(rows.nth(0)).toContainText('web development for the rest of us');
-	await expect(rows.nth(0)).toContainText('7 open');
-	await expect(rows.nth(1)).toContainText('octant-user/dotfiles');
-	await expect(rows.nth(1)).toContainText('private');
 
 	// A pull request row names the repository it is in, because this list spans
 	// all of them.
@@ -3736,14 +3715,29 @@ test('the app opens on your repositories and what is in flight', async ({ page }
 		'sveltejs/svelte'
 	);
 
-	// One page of repositories and one search pair. No per-row read on either:
-	// fifty-two rows and three pull requests cost two queries between them.
+	// The other list is a click away and is not on screen.
+	await expect(repoList(page)).toHaveCount(0);
+
+	// Nothing is selected, so the header carries pills and no verbs — there is no
+	// object to carry them, and the two views are the sidebar's job.
+	await expect(page.getByRole('banner')).toContainText('2 for you');
+	await expect(
+		page.getByRole('banner').getByRole('link', { name: /^(Repositories|Pull requests)$/ })
+	).toHaveCount(0);
+
+	// The badge and two items are the whole sidebar: no third view, and no
+	// contextual section under them.
+	const primary = page.getByRole('navigation', { name: 'Primary' });
+	await expect(primary.getByRole('link')).toHaveCount(3);
+	await expect(primary).not.toContainText('Recent');
+	await expect(primary).not.toContainText('All');
+
+	// Two queries between them, and no per-row read on either.
 	expect(stub.calls.Repos).toBe(1);
 	expect(stub.calls.Inbox).toBe(1);
 
 	// Resting on a row warms the screen it opens, the bargain every list in the
-	// app makes. Not an exact count: the pointer is somewhere when the gate
-	// unmounts, and whatever it lands on is warmed for the same good reason.
+	// app makes.
 	await inboxList(page)
 		.getByRole('link', { name: /Rewrite the parser/ })
 		.hover();
@@ -3767,48 +3761,100 @@ test('a pull request in both searches is one row carrying both facts', async ({ 
 	await expect(page.getByRole('banner')).toContainText('2 for you');
 });
 
-test('j and k walk both lists and enter opens the row', async ({ page }) => {
+test('j and k walk the list and enter opens the row', async ({ page }) => {
 	await signIn(page);
 	await expect(inboxList(page).getByRole('link')).toHaveCount(3);
-	await expect(repoList(page).getByRole('link').first()).toContainText('sveltejs/svelte');
 
 	// Nothing is selected on arrival — a screen you have just opened should not
 	// claim one of its rows is special.
 	await expect(page.locator('[aria-current="true"]')).toHaveCount(0);
 
-	// Three pull requests, then the repositories underneath them: the cursor does
-	// not stop at the section boundary.
-	for (let i = 0; i < 4; i += 1) await page.keyboard.press('j');
-	await expect(page.locator('[aria-current="true"]')).toContainText('sveltejs/svelte');
-	await expect(context(page)).toContainText('Visibility');
+	await page.keyboard.press('j');
+	await expect(page.locator('[aria-current="true"]')).toContainText('Rewrite the parser');
+	await expect(context(page)).toContainText('Asked of you');
 
-	await page.keyboard.press('k');
+	for (let i = 0; i < 2; i += 1) await page.keyboard.press('j');
 	await expect(page.locator('[aria-current="true"]')).toContainText('Type the whole compiler');
 
 	await page.keyboard.press('Enter');
 	await expect(page).toHaveURL('/sveltejs/svelte/pull/4');
 });
 
-test('the filter is also the way to a repository that is not on the list', async ({ page }) => {
-	await signIn(page);
+test('the repository view is the other half, and its second page is a walk', async ({ page }) => {
+	const stub = await signIn(page);
 
-	// Slash focuses the field, as everywhere else in the app.
+	await page
+		.getByRole('navigation', { name: 'Primary' })
+		.getByRole('link', { name: 'Repositories' })
+		.click();
+	await expect(page).toHaveURL('/?view=repos');
+	await expect(inboxList(page)).toHaveCount(0);
+
+	// Ordered by what was pushed to, so the top of the list is where the work is.
+	const rows = repoList(page).getByRole('link');
+	await expect(rows.nth(0)).toContainText('sveltejs/svelte');
+	await expect(rows.nth(0)).toContainText('web development for the rest of us');
+	await expect(rows.nth(0)).toContainText('7 open');
+	await expect(rows.nth(1)).toContainText('octant-user/dotfiles');
+	await expect(rows.nth(1)).toContainText('private');
+
+	// Fifty of fifty-two, and the button says how many are left.
+	await expect(page.getByRole('main')).toContainText('50 of 52 repositories');
+	await page.getByRole('button', { name: /Load more/ }).click();
+	await expect(page.getByRole('main')).toContainText('52 of 52 repositories');
+	await expect(page.getByRole('button', { name: /Load more/ })).toHaveCount(0);
+
+	// The second page is a page in its own right, filed under the cursor that
+	// fetched it — so it is one more request, not a re-read of the first.
+	expect(stub.repos.head).toBe(1);
+	expect(Object.keys(stub.repos)).toHaveLength(2);
+});
+
+test('the filter is also the way to a repository that is not on any list', async ({ page }) => {
+	await signIn(page);
+	await expect(inboxList(page).getByRole('link')).toHaveCount(3);
+
+	// Slash focuses the field, as everywhere else in the app. An address is
+	// offered from the pull request view too — it is where you arrive.
 	await page.keyboard.press('/');
 	await page.keyboard.type('rich/kit');
 
-	// Nothing on the list matches, and what was typed is an address.
-	await expect(repoList(page).getByRole('link')).toHaveCount(1);
-	await expect(repoList(page).getByRole('link')).toContainText('Open rich/kit');
+	const address = page.getByRole('navigation', { name: 'Go to a repository' });
+	await expect(address.getByRole('link')).toContainText('Open rich/kit');
+	await expect(inboxList(page).getByRole('link')).toHaveCount(0);
 
-	await repoList(page).getByRole('link').click();
+	// It is row zero, so enter opens it without ever leaving the field.
+	await page.keyboard.press('Enter');
 	await expect(page).toHaveURL('/rich/kit');
 
-	// A name already on the list is not offered twice.
-	await openHome(page);
+	// On the repository view, a name already on the list is not offered as an
+	// address — the row below carries more than a name does.
+	await openHome(page, '/?view=repos');
 	await page.keyboard.press('/');
 	await page.keyboard.type('sveltejs/svelte');
+	await expect(page.getByRole('navigation', { name: 'Go to a repository' })).toHaveCount(0);
 	await expect(repoList(page).getByRole('link')).toHaveCount(1);
-	await expect(repoList(page).getByRole('link')).not.toContainText('Open sveltejs/svelte');
+});
+
+test('the home screen reads the review records of every repository at once', async ({ page }) => {
+	const stub = await signIn(page);
+
+	// Review #7 in its own repository, then push to it.
+	await openPull(page);
+	await page.getByRole('button', { name: 'Mark reviewed' }).click();
+	await expect(page.getByRole('button', { name: 'Recorded' })).toBeVisible();
+
+	stub.push(7, sha(109));
+	await expireMutable(page);
+	await openHome(page);
+
+	// The home list spans every repository, so the scan does too — one prefix
+	// read of `pull:`, no request, and the panel's first block is about the
+	// list on screen rather than about the repositories behind it.
+	const panel = context(page);
+	await expect(panel).toContainText('Reviewed before');
+	await expect(panel).toContainText('Moved since');
+	await expect(panel).not.toContainText('Pushed since');
 });
 
 test('the list says which repositories moved while you were away', async ({ page }) => {
@@ -3819,7 +3865,7 @@ test('the list says which repositories moved while you were away', async ({ page
 	await seedVisit(page, REPO_VISIT, HEAD);
 	await seedVisit(page, 'repo:octant-user/dotfiles', null);
 	await page.reload();
-	await openHome(page);
+	await openHome(page, '/?view=repos');
 
 	const moved = repoList(page).getByRole('link', { name: /sveltejs\/svelte/ });
 	await expect(
@@ -3834,48 +3880,18 @@ test('the list says which repositories moved while you were away', async ({ page
 	await expect(context(page)).toContainText('Opened before');
 });
 
-test('the two views narrow the screen, and the second page is a walk', async ({ page }) => {
-	const stub = await signIn(page);
-
-	await page
-		.getByRole('navigation', { name: 'Primary' })
-		.getByRole('link', { name: 'Pull requests' })
-		.click();
-	await expect(page).toHaveURL('/?view=pulls');
-	await expect(page.getByRole('heading', { name: 'Repositories' })).toHaveCount(0);
-	await expect(inboxList(page).getByRole('link')).toHaveCount(3);
-
-	await page
-		.getByRole('navigation', { name: 'Primary' })
-		.getByRole('link', { name: 'Repositories' })
-		.click();
-	await expect(page).toHaveURL('/?view=repos');
-	await expect(page.getByRole('heading', { name: 'In flight' })).toHaveCount(0);
-
-	// Fifty of fifty-two, and the button says how many are left.
-	await expect(page.getByRole('main')).toContainText('50 of 52 repositories');
-	await page.getByRole('button', { name: /Load more/ }).click();
-	await expect(page.getByRole('main')).toContainText('52 of 52 repositories');
-	await expect(page.getByRole('button', { name: /Load more/ })).toHaveCount(0);
-
-	// The second page is a page in its own right, filed under the cursor that
-	// fetched it — so it is one more request, not a re-read of the first.
-	expect(stub.repos.head).toBe(1);
-	expect(Object.keys(stub.repos)).toHaveLength(2);
-});
-
 test('coming back to the home screen is a local read', async ({ page }) => {
 	const stub = await signIn(page);
 
-	await repoList(page)
-		.getByRole('link', { name: /sveltejs\/svelte/ })
+	await inboxList(page)
+		.getByRole('link', { name: /Rewrite the parser/ })
 		.click();
-	await expect(listing(page).getByRole('link', { name: 'README.md' })).toBeVisible();
+	await expect(page).toHaveURL('/sveltejs/svelte/pull/7');
 
 	// The account's two lists are cached under the account, not under a
 	// repository — so walking back to them costs nothing.
 	await page.goBack();
-	await expect(repoList(page).getByRole('link', { name: /sveltejs\/svelte/ })).toBeVisible();
+	await expect(inboxList(page).getByRole('link')).toHaveCount(3);
 	expect(stub.calls.Repos).toBe(1);
 	expect(stub.calls.Inbox).toBe(1);
 });

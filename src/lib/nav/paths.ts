@@ -122,26 +122,31 @@ export interface CompareAddress {
 /**
  * The account screen — the two lists that are about you rather than about a
  * repository. Which of them is on screen is a query parameter and not a
- * segment, the same line the rest of this file draws: `both` and `repos` are
- * views of one address, not two addresses.
+ * segment, the same line the rest of this file draws: they are views of one
+ * address, not two addresses.
+ *
+ * **Pull requests are the default**, so the app opens on the half with a
+ * deadline. There was a third view that showed both lists stacked; it was the
+ * default and it was wrong — a landing screen either answers a question or
+ * asks you to scroll past one to find the other.
  */
-export type HomeView = 'all' | 'repos' | 'pulls';
+export type HomeView = 'pulls' | 'repos';
 
 export interface HomeAddress {
 	view: HomeView;
 }
 
-const VIEWS: Record<string, HomeView> = { all: 'all', repos: 'repos', pulls: 'pulls' };
+const VIEWS: Record<string, HomeView> = { pulls: 'pulls', repos: 'repos' };
 
 export function homeHref(options: { view?: HomeView } = {}): string {
 	const base = resolve('/');
-	// `all` is the default and is left out, so the plain URL is the one the
+	// `pulls` is the default and is left out, so the plain URL is the one the
 	// sidebar's badge points at and the one you would type.
-	return options.view && options.view !== 'all' ? `${base}?view=${options.view}` : base;
+	return options.view === 'repos' ? `${base}?view=repos` : base;
 }
 
 export function parseHome(search?: URLSearchParams): HomeAddress {
-	return { view: VIEWS[search?.get('view') ?? ''] ?? 'all' };
+	return { view: VIEWS[search?.get('view') ?? ''] ?? 'pulls' };
 }
 
 export function repoHref(repo: RepoRef): string {
