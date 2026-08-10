@@ -36,7 +36,7 @@ export const META = {
 	auth: 'auth',
 	/** Last known rate-limit state, so the meter is populated before the first query. */
 	rateLimit: 'rateLimit',
-	/** Repositories opened before, most recent first. The home screen's `Recent`. */
+	/** Repositories opened before, most recent first. The tick's pinned set. */
 	recent: 'recent'
 } as const;
 

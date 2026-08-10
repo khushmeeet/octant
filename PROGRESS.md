@@ -1822,8 +1822,8 @@ flight that have your name on them, and the `owner/name` text field is gone. ✅
 | `visits/repos.svelte.ts` | new — which repositories moved while you were away, from one prefix scan |
 | `visits/ids.ts` | `REPO_VISIT_PREFIX`, `repoSlugFrom` — the scan's address |
 | `home/HomeScreen.svelte` | new — the screen |
-| `home/Recents.svelte` | new — the sidebar's `Recent` section |
-| `ui/Sidebar.svelte` | takes a `head` and `items` for a screen that is not about a repository |
+| `ui/Sidebar.svelte` | takes a `head` and `items` for a screen that is not about a repository; `section={null}` drops the contextual block |
+| `nav/recent.svelte.ts` | now only the tick's pinned set; `forget` had no caller left and went |
 | `ui/types.ts` | `NavHead`, `NavItem` |
 | `nav/paths.ts` | `homeHref`, `parseHome`, `HomeView` |
 | `routes/+page.svelte` | the entry form is gone; the screen is here |
@@ -1870,11 +1870,21 @@ exact version against the SHA.
 repository open they used to render as four dead items titled with the phase
 that would build them — which was already a lie by Phase 7, since all four
 shipped. A screen above the repository now supplies its own badge and its own
-items, and the four are back to meaning what they say. The `Recent` list moved
-into the contextual section, which is where a per-screen list belongs and where
-it stops competing with the API's own list: one is what exists, the other is
-where you have been, and on an account with three hundred repositories the
-second one is usually the answer.
+items, and the four are back to meaning what they say.
+
+**Below them there is nothing, and that is the finished shape.** The first cut
+put the old entry screen's `Recent` list in the contextual section and gave the
+header two verbs, `Pull requests` and `Repositories`, for when no row was
+selected. Both went, and for the same reason the verb row went in the chrome
+pass: they were the screen repeating itself. The two views are sidebar items
+three inches above where the verbs were, and the recent list was a worse copy
+of the list filling the screen beside it — GitHub's own, ordered by what was
+pushed to, with the dots saying which ones moved. So the section is absent
+rather than empty (a heading over nothing reads as a section that failed to
+load), and with no row selected the header carries pills and no verbs, because
+there is no object to carry them. `recent` itself stays: `sync/tick.ts` reads
+the top three as the pinned set, and PLAN.md Phase 9 wants it as a palette
+group.
 
 **Typing `owner/name` still works, as a row rather than as a screen.** A
 repository you can read but are not a member of is on no list GitHub will hand

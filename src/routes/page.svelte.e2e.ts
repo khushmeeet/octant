@@ -3708,6 +3708,20 @@ test('the app opens on your repositories and what is in flight', async ({ page }
 	await expect(page.getByRole('heading', { name: 'Repositories' })).toBeVisible();
 	await expect(page.getByRole('navigation', { name: 'Primary' })).toContainText('octant-user');
 
+	// Nothing is selected, so the header carries pills and no verbs — there is no
+	// object to carry them, and the two views are the sidebar's three items.
+	await expect(page.getByRole('banner')).toContainText('52 repositories');
+	await expect(
+		page.getByRole('banner').getByRole('link', { name: /^(Repositories|Pull requests)$/ })
+	).toHaveCount(0);
+
+	// The sidebar's three items are the whole of it: no contextual section, and
+	// no heading standing over one.
+	const primary = page.getByRole('navigation', { name: 'Primary' });
+	// The badge and the three views, and nothing under them.
+	await expect(primary.getByRole('link')).toHaveCount(4);
+	await expect(primary).not.toContainText('Recent');
+
 	// Ordered by what was pushed to, so the top of the list is where the work is.
 	const rows = repoList(page).getByRole('link');
 	await expect(rows.nth(0)).toContainText('sveltejs/svelte');

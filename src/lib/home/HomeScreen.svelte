@@ -38,7 +38,6 @@
 	import { ago, agoAt, count } from '$lib/ui/format';
 	import type { Crumb, NavHead, NavItem, PanelEntry, Verb } from '$lib/ui/types';
 	import { reposSeen } from '$lib/visits/repos.svelte';
-	import Recents from './Recents.svelte';
 
 	/**
 	 * The home screen — where the app opens.
@@ -345,20 +344,11 @@
 			];
 		}
 
-		return [
-			{
-				id: 'pulls',
-				label: 'Pull requests',
-				href: homeHref({ view: 'pulls' }),
-				title: 'Only what is in flight'
-			},
-			{
-				id: 'repos',
-				label: 'Repositories',
-				href: homeHref({ view: 'repos' }),
-				title: 'Only the repositories'
-			}
-		];
+		// Nothing selected, so there is no object to carry verbs — ARCHITECTURE.md
+		// §2. The two views live in the sidebar, which is where a destination
+		// belongs; repeating them here was chrome pretending to be navigation, the
+		// same thing the Tree screen's `Files` and `Readme` were.
+		return [];
 	});
 
 	const utility = $derived.by<Verb | undefined>(() => {
@@ -505,9 +495,9 @@
 <svelte:window onkeydown={onKeydown} />
 
 {#snippet sidebar()}
-	<Sidebar {head} {items} active={view} section="Recent">
-		<Recents />
-	</Sidebar>
+	<!-- No contextual section: the three items above it are the whole of this
+	     screen's navigation, and everything else about the account is a row. -->
+	<Sidebar {head} {items} active={view} section={null} />
 {/snippet}
 
 {#snippet pills()}

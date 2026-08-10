@@ -50,8 +50,12 @@
 		refsCount?: number | null;
 		/** Pull requests in the state on screen, which is not always the open ones. */
 		reviewCount?: number | null;
-		/** Contextual section heading — `Files`, `Symbols`, `Scope`, `Threads`. */
-		section?: string;
+		/**
+		 * Contextual section heading — `Files`, `Symbols`, `Scope`, `Threads`.
+		 * `null` on a screen that has no contextual section: a heading over
+		 * nothing reads as a section that failed to load.
+		 */
+		section?: string | null;
 		/** The contextual section's body. */
 		children?: Snippet;
 	}
@@ -166,11 +170,17 @@
 		{/if}
 	{/each}
 
-	<div class="sec">{section}</div>
-	{#if children}
-		<div class="ctx">{@render children()}</div>
+	{#if section === null}
+		<!-- No contextual section at all. The space still belongs to the nav, so
+		     the account stays on the floor where every screen keeps it. -->
+		<div class="fill"></div>
 	{:else}
-		<p class="empty">Open a repository to browse its tree.</p>
+		<div class="sec">{section}</div>
+		{#if children}
+			<div class="ctx">{@render children()}</div>
+		{:else}
+			<p class="empty">Open a repository to browse its tree.</p>
+		{/if}
 	{/if}
 
 	{#if viewer}
@@ -311,6 +321,10 @@
 		padding: 0 6px;
 		font-size: 12px;
 		color: var(--tx3);
+		flex: 1;
+	}
+
+	.fill {
 		flex: 1;
 	}
 
