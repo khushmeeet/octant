@@ -2083,6 +2083,20 @@ test('the badge is the way back to the repository, and says when you are there',
 	await expect(badge).toHaveAttribute('aria-current', 'page');
 });
 
+test('the owner in the breadcrumb goes home', async ({ page }) => {
+	await signIn(page);
+	// A screen deep enough that the owner is not the crumb you are on.
+	await page.goto('/sveltejs/svelte/tree/HEAD/src');
+	await expect(listing(page).getByRole('link', { name: 'compiler.js' })).toBeVisible();
+
+	// The first crumb is the account, and the account's screen is the home
+	// screen: ARCHITECTURE.md §1 rules out owner and organisation pages, so the
+	// segment either goes to the one screen that is about you or is dead text.
+	await page.getByRole('banner').getByRole('link', { name: 'sveltejs', exact: true }).click();
+	await expect(page).toHaveURL('/');
+	await expect(inboxList(page).getByRole('link').first()).toBeVisible();
+});
+
 test('the verbs live in the header now, beside the pills they act on', async ({ page }) => {
 	await signIn(page);
 	await openRepo(page);

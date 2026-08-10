@@ -6,6 +6,7 @@
 		fileAnchor,
 		fileHref,
 		githubCommitUrl,
+		homeHref,
 		logHref,
 		parseFileAnchor,
 		repoHref,
@@ -120,7 +121,7 @@
 	/* ------------------------------------------------------------- chrome -- */
 
 	const crumbs = $derived.by<Crumb[]>(() => [
-		{ label: repo.owner },
+		{ label: repo.owner, href: homeHref() },
 		{ label: repo.name, href: repoHref(repo) },
 		{ label: 'commits', href: logHref(repo, null, '') },
 		{ label: data?.abbreviatedOid ?? rev.slice(0, 7), mono: true }

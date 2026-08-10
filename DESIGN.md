@@ -170,6 +170,9 @@ than a result. With no row selected the header carries pills and no verbs:
 there is no object to carry them.
 
 **Header** — breadcrumb left; the object's group and then the chrome, right.
+Every segment of the breadcrumb is a link to the thing it names, including the
+first: the owner goes to the home screen, which is the only screen that is about
+the account — there are no owner or organisation pages to send it to.
 The object's group is its pills (ref, HEAD SHA, state — `Open`, `1 check
 failing`) followed by its verbs as text buttons and the copy/utility verb
 last; it scrolls rather than pushing anything off the end. The chrome is ⌘K,

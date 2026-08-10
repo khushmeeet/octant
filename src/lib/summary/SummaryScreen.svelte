@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Markdown from '$lib/md/Markdown.svelte';
-	import { archiveUrl, commitHref, githubBlobUrl, treeHref } from '$lib/nav/paths';
+	import { archiveUrl, commitHref, githubBlobUrl, homeHref, treeHref } from '$lib/nav/paths';
 	import { ERROR_LABEL, GitHubSource, type RepoRef } from '$lib/source';
 	import { prefetch } from '$lib/sync/prefetch';
 	import { resource } from '$lib/sync/resource.svelte';
@@ -77,7 +77,10 @@
 
 	const head = $derived(summary.data?.head ?? null);
 
-	const crumbs = $derived.by<Crumb[]>(() => [{ label: repo.owner }, { label: repo.name }]);
+	const crumbs = $derived.by<Crumb[]>(() => [
+		{ label: repo.owner, href: homeHref() },
+		{ label: repo.name }
+	]);
 
 	/**
 	 * One verb. Browsing, history, refs and reviews are the sidebar's four

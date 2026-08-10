@@ -10,6 +10,7 @@
 		commitHref,
 		fileHref,
 		githubBlobUrl,
+		homeHref,
 		logHref,
 		parentPath,
 		rawUrl,
@@ -285,7 +286,7 @@
 
 	const crumbs = $derived.by<Crumb[]>(() => {
 		const list: Crumb[] = [
-			{ label: repo.owner },
+			{ label: repo.owner, href: homeHref() },
 			{ label: repo.name, href: treeHref(repo, address.rev, '') }
 		];
 

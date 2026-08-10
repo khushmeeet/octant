@@ -1,6 +1,13 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { archiveUrl, fileHref, parentPath, treeHref, type TreeAddress } from '$lib/nav/paths';
+	import {
+		archiveUrl,
+		fileHref,
+		homeHref,
+		parentPath,
+		treeHref,
+		type TreeAddress
+	} from '$lib/nav/paths';
 	import { ERROR_LABEL, GitHubSource, type TreeEntry } from '$lib/source';
 	import { prefetch } from '$lib/sync/prefetch';
 	import { resource } from '$lib/sync/resource.svelte';
@@ -224,7 +231,7 @@
 
 	const crumbs = $derived.by<Crumb[]>(() => {
 		const list: Crumb[] = [
-			{ label: repo.owner },
+			{ label: repo.owner, href: homeHref() },
 			{ label: repo.name, href: treeHref(repo, address.rev, '') }
 		];
 

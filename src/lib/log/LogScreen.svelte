@@ -3,6 +3,7 @@
 	import {
 		commitHref,
 		fileHref,
+		homeHref,
 		logHref,
 		parentPath,
 		treeHref,
@@ -322,7 +323,7 @@
 
 	const crumbs = $derived.by<Crumb[]>(() => {
 		const list: Crumb[] = [
-			{ label: repo.owner },
+			{ label: repo.owner, href: homeHref() },
 			{ label: repo.name, href: logHref(repo, address.rev, '') }
 		];
 

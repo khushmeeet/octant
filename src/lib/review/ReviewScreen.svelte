@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import {
+		githubPullUrl,
+		homeHref,
 		pullHref,
 		pullsHref,
 		repoHref,
 		treeHref,
-		githubPullUrl,
 		type PullsAddress
 	} from '$lib/nav/paths';
 	import {
@@ -272,7 +273,7 @@
 	/* ------------------------------------------------------------- chrome -- */
 
 	const crumbs = $derived.by<Crumb[]>(() => [
-		{ label: repo.owner },
+		{ label: repo.owner, href: homeHref() },
 		{ label: repo.name, href: repoHref(repo) },
 		{ label: 'pulls', href: pullsHref(repo) }
 	]);
