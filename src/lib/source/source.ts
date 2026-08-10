@@ -12,6 +12,7 @@ import { getPulls, type PullFilter, type PullsPage } from './pulls';
 import { getRefs, type RefKind, type RefsPage } from './refs';
 import { getRepo, type RepoSummary } from './repo';
 import { fromQuery, type CacheQuery } from './query';
+import { mergePull, type MergeRequest, type MergeResponse, type WriteResult } from './rest';
 import { getTree, type TreeListing } from './tree';
 import type { RepoRef } from './types';
 import { getViewerPulls, getViewerRepos, type InboxPulls, type ViewerReposPage } from './viewer';
@@ -155,6 +156,26 @@ export interface Source {
 	 * connection.
 	 */
 	getViewerPulls(login: string): CacheQuery<InboxPulls>;
+
+	/**
+	 * Land a pull request. **The one method here that is not a read**, and the
+	 * one place ARCHITECTURE.md §1's read-only rule is broken on purpose — see
+	 * the note there for why merging is the exception and nothing else is.
+	 *
+	 * It returns a promise rather than a `CacheQuery` because none of the read
+	 * path applies to it: there is nothing to cache, nothing to revalidate, and
+	 * nothing to replay. What it does have in common with the reads is the seam
+	 * — a screen still never touches `fetch`, a status code or the token.
+	 *
+	 * The caller re-reads the pull request afterwards. Patching the cached copy
+	 * to say `MERGED` from here would be us asserting the outcome; asking is
+	 * cheap, and it is the only version of events GitHub agrees with.
+	 */
+	mergePull(
+		ref: RepoRef,
+		number: number,
+		request: MergeRequest
+	): Promise<WriteResult<MergeResponse>>;
 }
 
 /**
@@ -366,5 +387,9 @@ export const GitHubSource: Source = {
 			maxAge: FRESHNESS.inbox,
 			run: (options) => getViewerPulls(options).then(fromQuery)
 		};
+	},
+
+	mergePull(ref, number, request) {
+		return mergePull(ref, number, request);
 	}
 };

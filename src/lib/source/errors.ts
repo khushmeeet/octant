@@ -110,6 +110,14 @@ export function httpError(response: Response, message?: string): SourceError {
 		return fail('invalid', message ?? `GitHub rejected the request (${status}).`, { status });
 	}
 
+	// How the merge endpoint says no: 405 is "not allowed in this state or by
+	// this method", 409 is "the head moved under you, or it does not merge".
+	// Both are conditions with something to say, and both carry GitHub's own
+	// sentence — which is more specific than anything we could write here.
+	if (status === 405 || status === 409) {
+		return fail('invalid', message ?? `GitHub refused the request (${status}).`, { status });
+	}
+
 	if (status >= 500) {
 		return fail('server', `GitHub returned ${status}.`, { status });
 	}

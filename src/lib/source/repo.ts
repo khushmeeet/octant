@@ -1,6 +1,7 @@
 import { document } from './document';
 import { fail } from './errors';
 import { query, type QueryOptions, type QueryResult } from './graphql';
+import type { MergeMethod } from './rest';
 import type { RepoRef } from './types';
 
 /**
@@ -27,12 +28,14 @@ interface RepoNode {
 	isPrivate: boolean;
 	isArchived: boolean;
 	url: string;
-	sshUrl: string;
 	diskUsage: number | null;
 	defaultBranchRef: { name: string; target: HeadNode | null } | null;
 	branches: { totalCount: number };
 	tags: { totalCount: number };
 	pullRequests: { totalCount: number };
+	mergeCommitAllowed: boolean | null;
+	squashMergeAllowed: boolean | null;
+	rebaseMergeAllowed: boolean | null;
 }
 
 export const REPO = document<{ repository: RepoNode | null }, RepoRef>({
@@ -45,7 +48,6 @@ export const REPO = document<{ repository: RepoNode | null }, RepoRef>({
 		isPrivate
 		isArchived
 		url
-		sshUrl
 		diskUsage
 		defaultBranchRef {
 			name
@@ -63,6 +65,9 @@ export const REPO = document<{ repository: RepoNode | null }, RepoRef>({
 		branches: refs(refPrefix: "refs/heads/") { totalCount }
 		tags: refs(refPrefix: "refs/tags/") { totalCount }
 		pullRequests(states: OPEN) { totalCount }
+		mergeCommitAllowed
+		squashMergeAllowed
+		rebaseMergeAllowed
 	}`
 });
 
@@ -83,13 +88,25 @@ export interface RepoSummary {
 	isPrivate: boolean;
 	isArchived: boolean;
 	url: string;
-	/** DESIGN.md §5's clone strip: read-only, then read/write. */
+	/**
+	 * The HTTPS clone URL, and the only one. The Summary screen used to offer
+	 * this and the SSH URL side by side, labelled `read-only` and `read/write`;
+	 * the choice between the two is made once in your git config, not on every
+	 * visit to a repository, so the screen carries the one that works for
+	 * anybody and the header's copy verb hands it over.
+	 */
 	cloneUrl: string;
-	sshUrl: string;
 	diskUsageKb: number | null;
 	defaultBranch: string | null;
 	head: HeadCommit | null;
 	counts: { commits: number; branches: number; tags: number; openPullRequests: number };
+	/**
+	 * Which ways this repository will let a pull request land, in the order the
+	 * Review screen offers them. A repository setting rather than a permission:
+	 * an empty list means every method is switched off, which GitHub allows and
+	 * which is worth saying out loud rather than discovering from a 405.
+	 */
+	mergeMethods: MergeMethod[];
 }
 
 export async function getRepo(
@@ -130,7 +147,6 @@ function summarise(node: RepoNode): RepoSummary {
 		url: node.url,
 		// GraphQL exposes no HTTPS clone field; it is the web URL with a suffix.
 		cloneUrl: `${node.url}.git`,
-		sshUrl: node.sshUrl,
 		diskUsageKb: node.diskUsage,
 		defaultBranch: node.defaultBranchRef?.name ?? null,
 		head: head?.oid
@@ -148,6 +164,21 @@ function summarise(node: RepoNode): RepoSummary {
 			branches: node.branches.totalCount,
 			tags: node.tags.totalCount,
 			openPullRequests: node.pullRequests.totalCount
-		}
+		},
+		mergeMethods: methods(node)
 	};
+}
+
+/**
+ * A field GitHub returned empty — an old cache entry, or a partial response —
+ * is read as allowed, so a missing answer offers the default rather than
+ * hiding the button. GitHub is the one that decides; sending a method it
+ * forbids costs a 405 with its own sentence in it.
+ */
+function methods(node: RepoNode): MergeMethod[] {
+	const out: MergeMethod[] = [];
+	if (node.mergeCommitAllowed !== false) out.push('merge');
+	if (node.squashMergeAllowed !== false) out.push('squash');
+	if (node.rebaseMergeAllowed !== false) out.push('rebase');
+	return out;
 }

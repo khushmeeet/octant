@@ -291,6 +291,111 @@ export function pullFiles(
 	return restGet<DiffFile[]>(path, rest);
 }
 
+/* ---------------------------------------------------------------- write -- */
+
+/**
+ * The one write in the client, and it is deliberately its own path rather than
+ * a flag on `restGet`.
+ *
+ * A read may be shared with an identical read in flight, replayed from a 304,
+ * or filed in the cache; every one of those is wrong for a write. So this
+ * skips `share()` — two clicks must not become one silently — carries no ETag,
+ * and hands nothing to the store. What it shares with the read path is the
+ * transport: the same headers, the same deadline, the same rate meter and the
+ * same error taxonomy, so a merge fails in the shape every screen already
+ * knows how to render.
+ */
+export type WriteResult<T> = { ok: true; data: T } | { ok: false; error: SourceError };
+
+export interface WriteOptions {
+	signal?: AbortSignal;
+	token?: string;
+	timeoutMs?: number;
+}
+
+/** What GitHub answers a merge with. `merged` is false only alongside a reason. */
+export interface MergeResponse {
+	sha: string;
+	merged: boolean;
+	message: string;
+}
+
+/**
+ * How the commit is built. A repository may forbid any of the three, which is
+ * why the summary reads which are allowed rather than the screen assuming.
+ */
+export type MergeMethod = 'merge' | 'squash' | 'rebase';
+
+export interface MergeRequest {
+	method: MergeMethod;
+	/**
+	 * The head the merge is *for*. GitHub refuses with a 409 when the branch has
+	 * moved past it, which is the whole reason it is sent: what gets merged is
+	 * what was read, or nothing.
+	 */
+	headOid: string;
+}
+
+/** `PUT /pulls/{n}/merge` — ARCHITECTURE.md §1's one exception to read-only. */
+export async function mergePull(
+	repo: RepoRef,
+	number: number,
+	request: MergeRequest,
+	options: WriteOptions = {}
+): Promise<WriteResult<MergeResponse>> {
+	const token = options.token ?? currentToken();
+	if (!token) {
+		return { ok: false, error: fail('unauthorized', 'No token. Connect one to merge.') };
+	}
+
+	const path = `/repos/${encodeRef(repo.owner)}/${encodeRef(repo.name)}/pulls/${number}/merge`;
+	const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+	let response: Response;
+	try {
+		response = await fetch(`${GITHUB_REST}${path}`, {
+			method: 'PUT',
+			headers: {
+				Authorization: `Bearer ${token}`,
+				Accept: 'application/vnd.github+json',
+				'Content-Type': 'application/json',
+				'X-GitHub-Api-Version': GITHUB_API_VERSION
+			},
+			body: JSON.stringify({ merge_method: request.method, sha: request.headOid }),
+			signal: withTimeout(options.signal, timeoutMs)
+		});
+	} catch (cause) {
+		return { ok: false, error: fromThrown(cause) };
+	}
+
+	const reading = rateFromHeaders(response.headers);
+	if (reading) rate.record('rest', reading);
+
+	if (!response.ok) {
+		return { ok: false, error: httpError(response, await readMessage(response)) };
+	}
+
+	let data: MergeResponse;
+	try {
+		data = (await response.json()) as MergeResponse;
+	} catch {
+		// The merge may well have happened. Saying so honestly is the only
+		// answer available, and the screen re-reads the pull request either way.
+		return {
+			ok: false,
+			error: fail('server', 'GitHub answered the merge with something we could not read.', {
+				status: response.status
+			})
+		};
+	}
+
+	if (!data.merged) {
+		return { ok: false, error: fail('invalid', data.message || 'GitHub did not merge it.') };
+	}
+
+	return { ok: true, data };
+}
+
 /**
  * Truncation is silent in the payload — a capped file list and a commit list
  * shorter than the count it reports. Detect it so the screen can say so and

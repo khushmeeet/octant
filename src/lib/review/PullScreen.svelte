@@ -23,8 +23,10 @@
 		pullFilesTruncated,
 		unresolved,
 		type ChangedFile,
+		type MergeMethod,
 		type PullDetail,
-		type ReviewThread
+		type ReviewThread,
+		type SourceError
 	} from '$lib/source';
 	import { pages } from '$lib/sync/pages.svelte';
 	import { prefetch } from '$lib/sync/prefetch';
@@ -350,6 +352,89 @@
 		return list;
 	});
 
+	/* ------------------------------------------------------------- merge -- */
+
+	/**
+	 * The one write in the app — ARCHITECTURE.md §1, and the note there for why
+	 * this and nothing else. Everything about it is deliberately unlike a read.
+	 *
+	 * **It confirms, because it cannot be undone.** A merge is the one act here
+	 * that changes somebody else's repository, and a single misplaced click on
+	 * a screen you navigate with `j` and `k` is not consent. So the green button
+	 * arms and a second, differently-labelled button commits — the same two
+	 * steps the act itself has.
+	 *
+	 * **It merges the head it was reading, not the head there is.** `headOid`
+	 * goes with the request, so a branch that moved while you read it fails with
+	 * GitHub's own 409 rather than landing work nobody looked at.
+	 *
+	 * **It asserts nothing afterwards.** On success the pull request is re-read
+	 * from GitHub. Writing `MERGED` into the cached copy ourselves would make
+	 * the screen agree with us instead of with the server, which is the one
+	 * thing a client of somebody else's state must never do.
+	 */
+	const mergeMethods = $derived<MergeMethod[]>(summary.data?.mergeMethods ?? ['merge']);
+
+	const METHOD_LABEL: Record<MergeMethod, string> = {
+		merge: 'Merge commit',
+		squash: 'Squash and merge',
+		rebase: 'Rebase and merge'
+	};
+
+	let picked = $state<MergeMethod | null>(null);
+
+	/** The picked method while the repository still allows it, else the first it does. */
+	const method = $derived<MergeMethod>(
+		picked && mergeMethods.includes(picked) ? picked : (mergeMethods[0] ?? 'merge')
+	);
+
+	let confirming = $state(false);
+	let merging = $state(false);
+	let mergeError = $state<SourceError | null>(null);
+
+	/** Why the button is not offered, in the words the bar will say. Null means go. */
+	const mergeBlocked = $derived.by<string | null>(() => {
+		if (!data) return 'Reading this pull request…';
+		if (data.isDraft) return 'This is a draft. GitHub will not merge one.';
+		if (data.mergeable === 'CONFLICTING') {
+			return `This does not merge cleanly into ${data.baseRefName}.`;
+		}
+		if (summary.data?.isArchived) return 'This repository is archived.';
+		if (mergeMethods.length === 0) return 'This repository allows no merge method.';
+		return null;
+	});
+
+	function armMerge(): void {
+		mergeError = null;
+		confirming = true;
+	}
+
+	function cancelMerge(): void {
+		confirming = false;
+	}
+
+	async function doMerge(): Promise<void> {
+		if (!data || !headOid || merging) return;
+
+		merging = true;
+		mergeError = null;
+
+		const result = await GitHubSource.mergePull(repo, number, { method, headOid });
+
+		merging = false;
+		confirming = false;
+
+		if (!result.ok) {
+			mergeError = result.error;
+			return;
+		}
+
+		// What landed is a commit on the base branch, so both reads are now old:
+		// the pull request's state, and the repository's HEAD and open count.
+		pull.refresh();
+		summary.refresh();
+	}
+
 	/* ------------------------------------------------------------ chrome -- */
 
 	const stateWord = $derived.by(() => {
@@ -512,7 +597,7 @@
 
 {#snippet pills()}
 	{#if data}
-		<Pill tone={data.state === 'MERGED' ? 'accent' : data.isDraft ? 'plain' : 'default'}>
+		<Pill tone={data.state === 'MERGED' ? 'merged' : data.isDraft ? 'plain' : 'default'}>
 			{stateWord}
 		</Pill>
 		{#if checkWord}
@@ -615,6 +700,74 @@
 						</p>
 					</section>
 
+					{#if data.state === 'MERGED'}
+						<!-- Purple, and DESIGN.md §3 spends purple on exactly this. -->
+						<p class="landed" role="status">
+							<b>Merged</b>
+							<span>
+								<span class="mono">{data.headRefName}</span> landed in
+								<span class="mono">{data.baseRefName}</span>{data.mergedAt
+									? ` ${ago(data.mergedAt)} ago`
+									: ''}.
+							</span>
+						</p>
+					{:else if data.state === 'CLOSED'}
+						<p class="landed shut" role="status">
+							<b>Closed</b>
+							<span>This was closed without merging into {data.baseRefName}.</span>
+						</p>
+					{:else}
+						<div class="mergebar">
+							<span class="mword">
+								{#if mergeBlocked}
+									{mergeBlocked}
+								{:else if confirming}
+									{METHOD_LABEL[method]} into <span class="mono">{data.baseRefName}</span>, at
+									<span class="mono">{headOid.slice(0, 7)}</span>. This cannot be undone.
+								{:else}
+									Merge <span class="mono">{data.headRefName}</span> into
+									<span class="mono">{data.baseRefName}</span>.
+								{/if}
+							</span>
+
+							{#if !mergeBlocked}
+								{#if mergeMethods.length > 1 && !confirming}
+									<span class="methods">
+										{#each mergeMethods as option (option)}
+											<button
+												class="method"
+												class:on={option === method}
+												aria-pressed={option === method}
+												title={METHOD_LABEL[option]}
+												onclick={() => (picked = option)}
+											>
+												{METHOD_LABEL[option]}
+											</button>
+										{/each}
+									</span>
+								{/if}
+
+								{#if confirming}
+									<button class="go" disabled={merging} onclick={doMerge}>
+										{merging ? 'Merging…' : 'Confirm merge'}
+									</button>
+									<button class="cancel" disabled={merging} onclick={cancelMerge}>Cancel</button>
+								{:else}
+									<button class="go" onclick={armMerge}>Merge pull request</button>
+								{/if}
+							{/if}
+						</div>
+					{/if}
+
+					{#if mergeError}
+						<p class="warn" role="alert">
+							<b>{ERROR_LABEL[mergeError.kind]}</b>{mergeError.message}
+							{#if mergeError.kind === 'forbidden' || mergeError.kind === 'unauthorized'}
+								Merging needs a token with write access to this repository.
+							{/if}
+						</p>
+					{/if}
+
 					{#if view === 'since' && reviewedAt}
 						<p class="since" role="status">
 							<b>Since your last review</b>
@@ -673,12 +826,6 @@
 							>
 								See the whole diff on github.com
 							</a>.
-						</p>
-					{/if}
-
-					{#if data.mergeable === 'CONFLICTING'}
-						<p class="warn" role="status">
-							<b>Conflicts</b>This does not merge cleanly into {data.baseRefName}.
 						</p>
 					{/if}
 
@@ -780,6 +927,8 @@
 	 */
 	.head,
 	.since,
+	.landed,
+	.mergebar,
 	.fail,
 	.warn,
 	.none,
@@ -872,6 +1021,134 @@
 		color: var(--acc-tx);
 		font-weight: 500;
 		flex: none;
+	}
+
+	/*
+	 * The merge bar and the merged banner are the same 8px/14px band the since
+	 * banner is, so a pull request has one row under its heading whatever state
+	 * it is in and the diff below never moves depending on the answer.
+	 */
+	.landed,
+	.mergebar {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin: 0;
+		/* The one band that fills the column rather than shrinking to its text:
+		   its button is the screen's primary action, and an action that lands
+		   wherever the sentence beside it happens to end is one you hunt for. */
+		min-width: 100%;
+		padding: 8px var(--pad-main);
+		border-top: 1px solid var(--bd);
+		border-bottom: 1px solid var(--bd);
+		font-size: 12px;
+		color: var(--tx2);
+	}
+
+	.landed {
+		background: var(--mg-bg);
+	}
+
+	.landed b {
+		color: var(--mg);
+		font-weight: 500;
+		flex: none;
+	}
+
+	/* Closed without merging is not a state with a colour: nothing landed, and
+	   red already means removed. */
+	.landed.shut {
+		background: var(--side);
+	}
+
+	.landed.shut b {
+		color: var(--tx2);
+	}
+
+	.mergebar {
+		background: var(--side);
+	}
+
+	/* Takes the slack, so the buttons sit at the right edge and stay there as
+	   the sentence beside them changes length between the two steps. */
+	.mword {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.methods {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		flex: none;
+	}
+
+	.method {
+		font-size: 11.5px;
+		color: var(--tx3);
+		padding: 2.5px 8px;
+		border-radius: var(--radius-item);
+		white-space: nowrap;
+		transition:
+			color 120ms,
+			background-color 120ms;
+	}
+
+	.method:hover {
+		background: var(--hover);
+		color: var(--tx);
+	}
+
+	.method.on {
+		background: var(--sel);
+		color: var(--tx);
+	}
+
+	/*
+	 * The only filled button in the app, and green because green is what it
+	 * does: this is the diff above it, added to the base branch. It is the last
+	 * thing in the bar on every state, so the pointer lands in the same place
+	 * whether it is arming the merge or confirming it.
+	 */
+	.go {
+		flex: none;
+		background: var(--ok);
+		color: var(--bg);
+		font-size: 12px;
+		font-weight: 500;
+		padding: 3px 12px;
+		border-radius: var(--radius-item);
+		white-space: nowrap;
+		transition:
+			background-color 120ms,
+			color 120ms;
+	}
+
+	.go:hover:not(:disabled) {
+		background: var(--ok-hover);
+	}
+
+	.go:disabled {
+		background: var(--raise);
+		color: var(--tx3);
+		cursor: default;
+	}
+
+	.cancel {
+		flex: none;
+		font-size: 12px;
+		color: var(--tx3);
+		padding: 3px 8px;
+		border-radius: var(--radius-item);
+		transition: color 120ms;
+	}
+
+	.cancel:hover:not(:disabled) {
+		color: var(--tx);
+	}
+
+	.cancel:disabled {
+		cursor: default;
 	}
 
 	.seen {

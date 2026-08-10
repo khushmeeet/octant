@@ -27,7 +27,30 @@ outside the scope below links out.
 **Explicitly out of scope** — Actions, Projects, Discussions, Wiki, Issues,
 org and repo settings, billing, security tab, marketplace, social features
 (stars, follows, feeds). No write operations beyond review comments in a
-later phase.
+later phase, and **merging**.
+
+**Merging is the one write, and the exception is narrow on purpose.** This
+document ruled out writes altogether, and that was right for everything except
+the act the Review screen exists to lead to: you read a diff in order to decide
+whether it lands, and sending someone to github.com to click the last button is
+the one place the client stops being a client and becomes a detour. So
+`Source.mergePull` exists and nothing else like it does — no closing, no
+reopening, no labels, no comments, no branch deletion. Every one of those is a
+write we can be talked into next, and the line has to sit somewhere.
+
+What the exception buys is paid for in three rules, all of them in
+`source/rest.ts` and `review/PullScreen.svelte`:
+
+- **It is not on the read path.** The write shares the transport — headers,
+  deadline, rate meter, error taxonomy — and none of the machinery: no
+  in-flight sharing, no ETag, no store. A read that is replayed is free; a
+  write that is replayed is a second merge.
+- **It names the head it read.** The `sha` goes with the request, so a branch
+  that moved while you were reading it is refused by GitHub rather than merged
+  behind your back.
+- **It asserts nothing.** On success the pull request is re-read. We never
+  write `MERGED` into the cached copy ourselves, because the only version of
+  events worth rendering is the server's.
 
 **Home is the one account surface, and it is deliberate.** This document
 originally ruled the account out along with the rest of GitHub's product and

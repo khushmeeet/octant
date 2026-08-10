@@ -68,10 +68,25 @@ and copyable."
 | `--acc-tx` | `#8D95F2`                | accent text                   |
 | `--acc-bg` | `rgba(94,106,210,.15)`   | accent fill                   |
 | `--ok`     | `#4CB782`                | added / success               |
-| `--ok-bg`  | `rgba(76,183,130,.12)`   | added row fill                |
+| `--ok-bg`  | `rgba(76,183,130,.12)`   | added pill fill               |
+| `--ok-line`| `rgba(76,183,130,.18)`   | added diff row                |
+| `--ok-row` | `#1A2E25`                | the same, flattened           |
+| `--ok-word`| `rgba(76,183,130,.38)`   | the words that changed        |
+| `--ok-hover`| `#5CC48F`               | the merge button, hovered     |
 | `--no`     | `#E5484D`                | removed / failure             |
-| `--no-bg`  | `rgba(229,72,77,.12)`    | removed row fill              |
+| `--no-bg`  | `rgba(229,72,77,.12)`    | removed pill fill             |
+| `--no-line`| `rgba(229,72,77,.18)`    | removed diff row              |
+| `--no-row` | `#361A1C`                | the same, flattened           |
+| `--no-word`| `rgba(229,72,77,.38)`    | the words that changed        |
 | `--wn`     | `#F2C94C`                | force push, unresolved        |
+| `--mg`     | `#A371F7`                | merged                        |
+| `--mg-bg`  | `rgba(163,113,247,.16)`  | merged fill                   |
+
+`--ok-row` and `--no-row` are `--ok-line` and `--no-line` composited against
+`--panel`, and must be recomputed whenever either moves. A diff's gutters and
+sign column are sticky over scrolling source, so they cannot be translucent —
+and they cannot be a different colour from the row they belong to either, or
+the tint stops at the sign and the row stops reading as one thing.
 
 ### Light
 
@@ -85,8 +100,13 @@ and copyable."
 | `--bd` / `--bd2`                  | `rgba(0,0,0,.09)` / `rgba(0,0,0,.14)`          |
 | `--acc` / `--acc-tx` / `--acc-bg` | `#5E6AD2` / `#4F58B8` / `rgba(94,106,210,.10)` |
 | `--ok` / `--ok-bg`                | `#2E7D5B` / `rgba(46,125,91,.10)`              |
+| `--ok-line` / `--ok-row`          | `rgba(46,125,91,.16)` / `#DDEAE4`              |
+| `--ok-word` / `--ok-hover`        | `rgba(46,125,91,.32)` / `#26694B`              |
 | `--no` / `--no-bg`                | `#C93B40` / `rgba(201,59,64,.10)`              |
+| `--no-line` / `--no-row`          | `rgba(201,59,64,.16)` / `#F6E0E0`              |
+| `--no-word`                       | `rgba(201,59,64,.32)`                          |
 | `--wn`                            | `#B07D14`                                      |
+| `--mg` / `--mg-bg`                | `#8250DF` / `rgba(130,80,223,.12)`             |
 
 ### Syntax
 
@@ -101,9 +121,13 @@ Restrained by design — these sit _under_ the chrome, never above it.
 
 ### Semantics — each meaning used once
 
-- **Green / red** — added / removed. Diff state only, nowhere else.
+- **Green / red** — added / removed. Diff state only, nowhere else — and the
+  merge button, which is the same meaning acted on: it is the added and removed
+  above it, applied to the base branch.
 - **Indigo** — this concerns you: owned paths, unread changes, active view.
 - **Amber** — a force push you have not seen; unresolved thread.
+- **Purple** — merged, and nothing else. A landed pull request used to be
+  indigo, which reads "this concerns you"; it is the one that no longer does.
 - Everything else is greyscale.
 
 ---
@@ -187,13 +211,17 @@ down for verbs that fit next to the pills.
 
 **Summary** — the repository's own screen, and where it opens. Description at
 13px, then one line for the head commit — SHA in accent mono, headline, author
-and age right-aligned — then the clone strip, all above a hairline. Below it the
-README, **at the full width of the main column**: here the prose is the screen
-rather than a note under a listing, and the 76-character measure that reads best
-beside something else reads as unfinished with nothing beside it.
+and age right-aligned — both above a hairline. Below it the README, **at the
+full width of the main column**: here the prose is the screen rather than a note
+under a listing, and the 76-character measure that reads best beside something
+else reads as unfinished with nothing beside it.
 
-**Clone strip** — Summary screen only. Two labelled URLs, `read-only` and
-`read/write`, in mono at 11.5px.
+The clone URL is in the header's copy slot, `Copy URL`, with the URL itself in
+the title. It was a strip under the head commit offering two of them labelled
+`read-only` and `read/write`, and the labels were the problem: HTTPS or SSH is
+a decision made once in a git config, and re-asking it cost a row of the screen
+on every visit. Every other screen keeps the one string it exists to hand you in
+the same slot — `Copy SHA`, `Copy checkout` — so this is where you already look.
 
 **Row** — 32px, flex, hover and selected states. Composition varies by
 screen but the height and padding never do.
@@ -205,8 +233,39 @@ fixed order: since your last visit → about → open against it.
 **Code viewer** — line numbers, optional blame gutter, source. Blame runs
 collapse: repeated SHAs render transparent so authorship reads as blocks.
 
-**Diff** — sign column (14px), row-level tint from `--ok-bg` / `--no-bg`,
+**Diff** — sign column (14px), row-level tint from `--ok-line` / `--no-line`,
 hunk headers on `--side` carrying the "pushes since you reviewed" count.
+
+The tint runs the **whole** row — line numbers, sign and source — because a
+sign is one character in a 14px column and reading a diff by it means reading
+every line to find the handful that moved. Inside a replaced block, the runs of
+text that actually differ take a second layer of the same colour, at
+`--ok-word` / `--no-word`. That is the difference between "this line changed"
+and "this word changed", and it is the whole reason to open a diff at all.
+
+**Matching is character-level; the highlight is word-level.** Characters find
+the change — a transposition inside an identifier is invisible to anything
+coarser — and a span that lands inside a word is then grown to hold the whole
+word, because a highlight starting three characters into a name is confetti.
+The comparison is between whole *blocks*: every removed line joined against
+every added line, so a rewrapped paragraph or a statement split across two
+lines reads as text that moved rather than as three unrelated rows.
+
+A refinement is never a claim, and all four ways of having no answer produce
+the same one — the row tint and nothing more: a run of removals with no
+additions after it, text that came back unchanged, two blocks too unalike to be
+versions of each other, and a line covered end to end, which the row tint has
+already accounted for.
+
+**Merge bar** — Review screen, directly under the heading, the same 8px/14px
+band as the "since your last review" banner and filling the column rather than
+shrinking to its text. It says what will happen in words, offers only the
+methods the repository allows, and ends in the app's **one filled button**, in
+`--ok`. It arms rather than acts: the green button turns into `Confirm merge`
+beside a `Cancel`, because a merge cannot be undone and one click on a screen
+you navigate with `j` and `k` is not consent. Blocked — draft, conflicting,
+archived — it keeps the band and drops the button, and says which of the three
+it is. Merged, the band goes purple and says what landed where.
 
 **Thread** — 8px radius card, indented 60px from the gutter, avatar +
 author + relative time, status pill right-aligned, replies separated by a
@@ -289,6 +348,9 @@ rounded corners above 10px.
   only for non-essential meta, never for anything load-bearing.
 - Colour is never the sole carrier of meaning: diff rows have `+`/`−` signs,
   status pills have text, the change dot has a tooltip and a sidebar
-  equivalent.
+  equivalent. The emphasis on the changed run inside a row is the one thing
+  carried by colour alone, and it is allowed to be — it refines a distinction
+  the sign column has already made in text, and nothing is lost by not seeing
+  it.
 - Focus is always visible; every verb-row action is reachable by tab.
 - Icons that carry meaning get labels; decorative ones are `aria-hidden`.
