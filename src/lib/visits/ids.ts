@@ -29,6 +29,20 @@ export function repoVisitId(repo: RepoRef): string {
 	return `repo:${repo.owner}/${repo.name}`;
 }
 
+/**
+ * Every repository record there is — the home screen's prefix scan, and the
+ * only read in the app that asks the `visits` store about more than one
+ * repository at a time. A list of what you can open is exactly the place where
+ * "and which of these moved while you were away" is one transaction rather than
+ * a round trip per row.
+ */
+export const REPO_VISIT_PREFIX = 'repo:';
+
+/** `owner/name`, from the id `visitsUnder(REPO_VISIT_PREFIX)` handed back. */
+export function repoSlugFrom(id: string): string {
+	return id.slice(REPO_VISIT_PREFIX.length);
+}
+
 export function pullVisitId(repo: RepoRef, number: number): string {
 	return `pull:${repo.owner}/${repo.name}:${number}`;
 }

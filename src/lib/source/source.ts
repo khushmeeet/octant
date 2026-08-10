@@ -1,4 +1,4 @@
-import { FRESHNESS, immutableKey, isOid, mutableKey, revKey } from '$lib/store';
+import { accountKey, FRESHNESS, immutableKey, isOid, mutableKey, revKey } from '$lib/store';
 import { getBlame, type FileBlame } from './blame';
 import { getBlob, getFile, type BlobContent, type FileContent } from './blob';
 import { getCommit, type CommitDetail } from './commit';
@@ -13,6 +13,7 @@ import { getRepo, type RepoSummary } from './repo';
 import { fromQuery, type CacheQuery } from './query';
 import { getTree, type TreeListing } from './tree';
 import type { RepoRef } from './types';
+import { getViewerPulls, getViewerRepos, type InboxPulls, type ViewerReposPage } from './viewer';
 
 /**
  * The `Source` seam — ARCHITECTURE.md §9.
@@ -32,6 +33,10 @@ import type { RepoRef } from './types';
  * reads rather than one — a list, an object with its conversation, and a diff
  * that is REST because GraphQL has no patch field. Folding the last two into
  * `getPulls` would have made one method mean three things.
+ *
+ * The home screen adds the last two, and they are the only methods here that do
+ * not take a `RepoRef` — every read above this point is about one repository,
+ * and these two are about the account that can see them all.
  */
 
 export interface Source {
@@ -123,6 +128,25 @@ export interface Source {
 	 * aliased expressions, no fan-out. What decides which paths are yours.
 	 */
 	getOwners(ref: RepoRef, rev: string): CacheQuery<OwnersFile>;
+
+	/**
+	 * One page of the repositories this token can see, most recently pushed
+	 * first. The home screen's list, and the answer to a question the arrival
+	 * screen used to ask *you*.
+	 *
+	 * `login` names the account rather than narrowing the query — GitHub reads
+	 * the viewer from the token — because it is the cache's address: one browser,
+	 * two tokens, two lists that must not be mistaken for each other.
+	 */
+	getViewerRepos(login: string, after?: string | null): CacheQuery<ViewerReposPage>;
+
+	/**
+	 * The open pull requests that involve you: the ones you opened, and the ones
+	 * waiting on your review, merged into one list. Two searches, one round trip,
+	 * and no per-row read — see `viewer.ts` for why it is search and not a
+	 * connection.
+	 */
+	getViewerPulls(login: string): CacheQuery<InboxPulls>;
 }
 
 /**
@@ -300,6 +324,27 @@ export const GitHubSource: Source = {
 			key: revKey('owners', ref, rev),
 			maxAge: FRESHNESS.owners,
 			run: (options) => getOwners(ref, rev, options).then(fromQuery)
+		};
+	},
+
+	getViewerRepos(login, after = null) {
+		// The cursor is part of the address, as it is on every other walk: a page
+		// is filed under where it starts, so paging back down a list you have
+		// already read is a local read.
+		const page = after ? `after=${after}` : 'head';
+
+		return {
+			key: accountKey('repos', login, page),
+			maxAge: FRESHNESS.repos,
+			run: (options) => getViewerRepos(after, options).then(fromQuery)
+		};
+	},
+
+	getViewerPulls(login) {
+		return {
+			key: accountKey('inbox', login),
+			maxAge: FRESHNESS.inbox,
+			run: (options) => getViewerPulls(options).then(fromQuery)
 		};
 	}
 };

@@ -3,7 +3,7 @@ import { idbGet, idbPut } from '$lib/store/idb';
 import { META, STORE } from '$lib/store/schema';
 
 /**
- * Repositories opened before — the entry screen's list.
+ * Repositories opened before — the home screen's `Recent` section.
  *
  * This is not cached data and it is not a `Store` concern: it is one small
  * record of what this person does, in the same family as `visits`. It lives in

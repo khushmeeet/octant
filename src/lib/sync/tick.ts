@@ -49,7 +49,8 @@ export function startTick(): () => void {
 	if (typeof window === 'undefined') return () => {};
 
 	// The pinned set is the recent list, and the recent list is on disk until
-	// something asks for it. The entry screen asks too; both are idempotent.
+	// something asks for it. The home screen's Recent section asks too; both are
+	// idempotent.
 	void recent.hydrate();
 
 	const timer = setInterval(sweep, TICK_INTERVAL);

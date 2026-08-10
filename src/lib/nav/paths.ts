@@ -8,7 +8,7 @@ import { lineHash, type LineRange } from './lines';
  * The URL scheme — PLAN.md Phase 3, which replaces Phase 0's local `active`
  * state with routing.
  *
- *   /                                   choose a repository
+ *   /                                   your repositories, and what needs you
  *   /{owner}/{name}                     tree at the default branch, root
  *   /{owner}/{name}/tree/{rev}          tree at a revision, root
  *   /{owner}/{name}/tree/{rev}/{path}   tree at a revision, in a directory
@@ -115,6 +115,33 @@ export interface CompareAddress {
 	/** Where the range starts. Either endpoint may be a SHA or a name. */
 	base: string;
 	head: string;
+}
+
+/* ----------------------------------------------------------------- home -- */
+
+/**
+ * The account screen — the two lists that are about you rather than about a
+ * repository. Which of them is on screen is a query parameter and not a
+ * segment, the same line the rest of this file draws: `both` and `repos` are
+ * views of one address, not two addresses.
+ */
+export type HomeView = 'all' | 'repos' | 'pulls';
+
+export interface HomeAddress {
+	view: HomeView;
+}
+
+const VIEWS: Record<string, HomeView> = { all: 'all', repos: 'repos', pulls: 'pulls' };
+
+export function homeHref(options: { view?: HomeView } = {}): string {
+	const base = resolve('/');
+	// `all` is the default and is left out, so the plain URL is the one the
+	// sidebar's badge points at and the one you would type.
+	return options.view && options.view !== 'all' ? `${base}?view=${options.view}` : base;
+}
+
+export function parseHome(search?: URLSearchParams): HomeAddress {
+	return { view: VIEWS[search?.get('view') ?? ''] ?? 'all' };
 }
 
 export function repoHref(repo: RepoRef): string {

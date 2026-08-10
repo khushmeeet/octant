@@ -1,5 +1,7 @@
 /** Shapes the shell's regions accept. Screens fill them; the shell never changes. */
 
+import type { IconName } from './icons';
+
 /** One segment of the header breadcrumb. The last is emphasised by the header. */
 export interface Crumb {
 	label: string;
@@ -37,6 +39,31 @@ export interface Verb {
  */
 export interface TreeMarks {
 	mark(path: string): { owned: boolean; title: string } | null;
+}
+
+/**
+ * The badge at the top of the sidebar: what the navigation below it is the
+ * navigation *of*. Normally the repository, and on the home screen the account.
+ */
+export interface NavHead {
+	label: string;
+	/** The letter in the badge. */
+	initial: string;
+	href?: string | null;
+	title?: string;
+}
+
+/**
+ * One sidebar destination. The repository's four are git's primitives —
+ * ARCHITECTURE.md §2 — and a screen that is not about a repository supplies its
+ * own, because a primitive of nothing is a dead item.
+ */
+export interface NavItem {
+	id: string;
+	label: string;
+	icon: IconName;
+	count: number | null;
+	href: string | null;
 }
 
 /** One key/value row in a right-panel block. */

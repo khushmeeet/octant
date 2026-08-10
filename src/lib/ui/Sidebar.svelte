@@ -5,7 +5,7 @@
 	import type { RepoSummary } from '$lib/source';
 	import Icon from './Icon.svelte';
 	import { count } from './format';
-	import type { IconName } from './icons';
+	import type { NavHead, NavItem } from './types';
 
 	/**
 	 * Navigation is git's primitives, not GitHub's product surface —
@@ -16,12 +16,24 @@
 	 * made Log a destination, Phase 6 did the same for Refs, and Phase 7 closes
 	 * the set — every one of the four now goes somewhere, which is the first
 	 * time the sidebar has told the whole truth.
+	 *
+	 * `head` and `items` exist for the one screen that is *above* a repository.
+	 * Git's four primitives are questions about a repository, so on the home
+	 * screen they have nothing to point at — and four dead items were what this
+	 * component used to render there. A screen that is not about a repository
+	 * supplies its own two, and everything else about the geography is unchanged:
+	 * badge, items with counts, contextual section, account.
 	 */
 	export type NavId = 'tree' | 'log' | 'refs' | 'review';
 
 	interface Props {
 		repo?: RepoSummary | null;
-		active?: NavId;
+		/** The nav item you are looking at. One of `NavId`, or a screen's own. */
+		active?: string;
+		/** Overrides the repository badge. For a screen that has no repository. */
+		head?: NavHead | null;
+		/** Overrides git's four. For the same screen, and nothing else. */
+		items?: NavItem[] | null;
 		/**
 		 * The revision the nav links carry. `null` addresses the default branch,
 		 * which is what keeps a link correct across a rename.
@@ -47,6 +59,8 @@
 	let {
 		repo = null,
 		active,
+		head = null,
+		items = null,
 		rev = null,
 		treeCount = null,
 		logCount = null,
@@ -59,24 +73,26 @@
 	const viewer = $derived(session.viewer);
 	const initial = $derived((viewer?.login ?? '?').charAt(0).toUpperCase());
 
-	interface NavItem {
-		id: NavId;
-		label: string;
-		icon: IconName;
-		count: number | null;
-		href: string | null;
-		/** The phase that builds it, for the item's title. */
-		phase: number;
-	}
+	/** The badge: the repository, unless a screen says it is about something else. */
+	const badge = $derived<NavHead | null>(
+		head ??
+			(repo
+				? {
+						label: repo.nameWithOwner,
+						initial: repo.owner.charAt(0).toUpperCase(),
+						href: repoHref(repo),
+						title: repo.nameWithOwner
+					}
+				: null)
+	);
 
-	const nav = $derived<NavItem[]>([
+	const primitives = $derived<NavItem[]>([
 		{
 			id: 'tree',
 			label: 'Tree',
 			icon: 'code',
 			count: treeCount,
-			href: repo ? repoHref(repo) : null,
-			phase: 3
+			href: repo ? repoHref(repo) : null
 		},
 		{
 			id: 'log',
@@ -88,8 +104,7 @@
 			// Repository-level, deliberately: a nav item goes to the whole of a
 			// thing. Scoping the log to a path is the verb row's job, and the
 			// sidebar's Scope section's.
-			href: repo ? logHref(repo, rev, '') : null,
-			phase: 5
+			href: repo ? logHref(repo, rev, '') : null
 		},
 		{
 			id: 'refs',
@@ -98,8 +113,7 @@
 			// Branches and tags, counted together, because they are one object
 			// and one screen — ARCHITECTURE.md §2.
 			count: refsCount ?? (repo ? repo.counts.branches + repo.counts.tags : null),
-			href: repo ? refsHref(repo) : null,
-			phase: 6
+			href: repo ? refsHref(repo) : null
 		},
 		{
 			id: 'review',
@@ -109,18 +123,24 @@
 			// is the same rule the Tree, Log and Refs items have followed since
 			// they became destinations.
 			count: reviewCount ?? repo?.counts.openPullRequests ?? null,
-			href: repo ? pullsHref(repo) : null,
-			phase: 7
+			href: repo ? pullsHref(repo) : null
 		}
 	]);
+
+	const nav = $derived(items ?? primitives);
 </script>
 
 <nav class="sb" aria-label="Primary">
-	{#if repo}
-		<a class="org" href={repoHref(repo)}>
-			<span class="av" aria-hidden="true">{repo.owner.charAt(0).toUpperCase()}</span>
-			<span class="orgname" title={repo.nameWithOwner}>{repo.nameWithOwner}</span>
+	{#if badge?.href}
+		<a class="org" href={badge.href}>
+			<span class="av" aria-hidden="true">{badge.initial}</span>
+			<span class="orgname" title={badge.title ?? badge.label}>{badge.label}</span>
 		</a>
+	{:else if badge}
+		<div class="org">
+			<span class="av" aria-hidden="true">{badge.initial}</span>
+			<span class="orgname" title={badge.title ?? badge.label}>{badge.label}</span>
+		</div>
 	{:else}
 		<div class="org">
 			<span class="av" aria-hidden="true">—</span>
@@ -136,11 +156,9 @@
 				{#if item.count !== null}<span class="n">{count(item.count)}</span>{/if}
 			</a>
 		{:else}
-			<span
-				class="nav off"
-				aria-disabled="true"
-				title="The {item.label} screen is Phase {item.phase}"
-			>
+			<!-- A destination with nothing to point at: no repository is open, so
+			     git's four primitives have nothing to be primitives of. -->
+			<span class="nav off" aria-disabled="true" title="Open a repository to reach {item.label}">
 				<Icon name={item.icon} />
 				<span class="lbl">{item.label}</span>
 				{#if item.count !== null}<span class="n">{count(item.count)}</span>{/if}

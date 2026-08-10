@@ -78,6 +78,18 @@ export {
 } from './pull';
 export { getPullFiles, pullFilesTruncated, type PullFilesPage } from './pull-files';
 export { getOwners, OWNERS, OWNERS_PATHS, type OwnersFile } from './owners';
+export {
+	getViewerPulls,
+	getViewerRepos,
+	INBOX,
+	INBOX_PAGE_SIZE,
+	REPOS,
+	REPOS_PAGE_SIZE,
+	type InboxPull,
+	type InboxPulls,
+	type ViewerRepo,
+	type ViewerReposPage
+} from './viewer';
 export { NO_CHECKS, type CheckRun, type CheckState, type CheckSummary } from './checks';
 export { commitOid, type RevisionNode } from './revision';
 export {

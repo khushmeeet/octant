@@ -1806,15 +1806,110 @@ it.
 
 ---
 
+## The home screen — what is there, and what needs me
+
+**Done when:** the app opens on your repositories and the pull requests in
+flight that have your name on them, and the `owner/name` text field is gone. ✅
+
+### What changed
+
+| File | Change |
+|---|---|
+| `source/viewer.ts` | new — `Repos` and `Inbox`, the two reads that are not about a repository |
+| `source/source.ts` | `getViewerRepos`, `getViewerPulls` on the seam |
+| `store/keys.ts` | `accountKey` — `kind:@login[:id]`, a third address shape |
+| `store/policy.ts` | `FRESHNESS.repos` (5 min) and `FRESHNESS.inbox` (1 min) |
+| `visits/repos.svelte.ts` | new — which repositories moved while you were away, from one prefix scan |
+| `visits/ids.ts` | `REPO_VISIT_PREFIX`, `repoSlugFrom` — the scan's address |
+| `home/HomeScreen.svelte` | new — the screen |
+| `home/Recents.svelte` | new — the sidebar's `Recent` section |
+| `ui/Sidebar.svelte` | takes a `head` and `items` for a screen that is not about a repository |
+| `ui/types.ts` | `NavHead`, `NavItem` |
+| `nav/paths.ts` | `homeHref`, `parseHome`, `HomeView` |
+| `routes/+page.svelte` | the entry form is gone; the screen is here |
+
+**The old screen asked you the one question it should have been answering.**
+`owner/name`, a text field, and a list of what you had opened before. It was
+defensible on the day it was written — `ARCHITECTURE.md` §1 ruled the account
+out with the rest of GitHub's product surface, and a list of everything you can
+see reads like the fan-out §7 forbids. Both of those were wrong on inspection.
+The account is not the feed: two lists, and every row on them is a way into the
+six repository screens. And a fan-out is a request per row — `viewer.repositories`
+is one query however many repositories come back, exactly like the pull request
+list that has been shipping since Phase 7.
+
+**Pull requests above repositories**, because they are the half with a
+deadline. The repositories are ordered by `pushedAt` rather than by name, so
+the top of the list is where the work is and the alphabet stays out of it.
+
+**The in-flight list is two searches, not a connection, and that is the one
+real trade in this change.** `viewer.pullRequests(states: OPEN)` returns what
+you *wrote*; the pull requests that need you most are the ones somebody else
+did. `search` is the only way to ask for both — `author:@me` and
+`review-requested:@me` — so the cost is GitHub's issue index, which lags a
+freshly opened pull request by a few seconds. For a screen that answers "what
+is waiting", that is the right side of the trade. The two sets are merged on
+repository and number rather than concatenated, because a pull request you
+opened and then sent back to yourself is one row carrying two facts.
+
+**Indigo means the same thing it has always meant.** A dot on a pull request
+row is "your review was asked for"; a dot on a repository row is "pushed to
+since you last opened it". Both are `DESIGN.md` §3's one meaning for the
+colour — this concerns you — and both carry the sentence in a title, because
+§9 does not allow colour to be the only carrier.
+
+**The repository dot is a time comparison, and it is the first one in the app.**
+Every other since-block compares SHAs. This one cannot: the list would need a
+head per row to do that, which is a field per row on a list whose whole point
+is that a row costs nothing. `visits` already records *when* you were last on a
+repository, the list already carries `pushedAt`, and "is it worth opening" is
+answered by the two. Inside the repository, `sinceLastVisit` still does the
+exact version against the SHA.
+
+**The sidebar's four primitives are not primitives of anything here.** With no
+repository open they used to render as four dead items titled with the phase
+that would build them — which was already a lie by Phase 7, since all four
+shipped. A screen above the repository now supplies its own badge and its own
+items, and the four are back to meaning what they say. The `Recent` list moved
+into the contextual section, which is where a per-screen list belongs and where
+it stops competing with the API's own list: one is what exists, the other is
+where you have been, and on an account with three hundred repositories the
+second one is usually the answer.
+
+**Typing `owner/name` still works, as a row rather than as a screen.** A
+repository you can read but are not a member of is on no list GitHub will hand
+us, so the filter doubles as an address bar: type or paste one — a github.com
+URL works too — and the repositories section offers it as its first row. The
+whole of the old screen, in the place you were already typing.
+
+**Two lists, one cursor.** `j` and `k` walk from the last pull request straight
+into the first repository, because a section boundary is a thing on screen and
+not a thing to remember. Each section is virtualised separately and both
+virtualise against the page's own scroller, which `VirtualRows` has supported
+since Phase 3 and which nothing had needed twice on one screen until now.
+
+**The cache is keyed by login.** `accountKey` writes `repos:@octant-user:head`,
+not `repos:head`. A cache is a shared disk and a browser may hold two tokens in
+turn; one of them can see repositories the other cannot, and reading the wrong
+list would be the kind of bug you would not notice for a week.
+
+---
+
 ## Carried forward
 
 Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
 
 - **Run every read against a real token.** `Repo`, `Tree`, `Blob`, `File`,
-  `Blame`, `Log`, `Refs`, `Pulls`, `Pull` and now `Owners` are schema-checked by
+  `Blame`, `Log`, `Refs`, `Pulls`, `Pull`, `Owners` and now `Repos` and `Inbox`
+  are schema-checked by
   hand and against stubs only, and no REST endpoint — the commit, the compare,
   the pull request's files — has been called for real. This has been blocking
-  since Phase 2 and is now ten documents deep across eight screens. Four most need a
+  since Phase 2 and is now twelve documents deep across nine screens.
+  **`Inbox` is the sharpest of them**, and it is new in kind: `search` is the
+  one read whose *result set* is a guess rather than its shape — whether
+  `sort:updated-desc` orders what we think, whether `archived:false` is doing
+  anything useful, and how far behind the index runs. A stub can say the screen
+  renders; only a token can say the screen is right. Four most need a
   real repository: `Blame`, because it is the most expensive field we ask for
   and whether its line numbers line up with `Blob.text` exactly is not something
   a stub can answer; `Log`, because the whole pagination design rests on a

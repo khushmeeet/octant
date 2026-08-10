@@ -6,7 +6,15 @@
  */
 
 export { IdbStore } from './idb-store';
-export { immutableKey, isOid, mutableKey, revKey, type CacheKey, type CacheStore } from './keys';
+export {
+	accountKey,
+	immutableKey,
+	isOid,
+	mutableKey,
+	revKey,
+	type CacheKey,
+	type CacheStore
+} from './keys';
 export { FRESHNESS } from './policy';
 export type { CacheEntry, PutOptions, Store, Visit } from './types';
 

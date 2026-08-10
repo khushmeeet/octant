@@ -60,6 +60,19 @@ export const FRESHNESS = {
 	pull: 15_000,
 	/** The triage list. As volatile as the pushes that reorder it. */
 	pulls: 30_000,
+	/**
+	 * Your repository list. The longest window of anything the app renders as a
+	 * list, because what moves it is being added to a repository or creating one
+	 * — events measured in weeks. The order moves on a push, and the screen that
+	 * shows it is the one you pass through rather than sit on.
+	 */
+	repos: 300_000,
+	/**
+	 * The pull requests in flight that involve you. Shorter than the repository
+	 * list beside it and for the opposite reason: this is the half of the home
+	 * screen that is supposed to have changed while you were away.
+	 */
+	inbox: 60_000,
 	/** Check runs, while CI is moving. */
 	checks: 15_000,
 	/**

@@ -142,7 +142,21 @@ repository browser is a dense list and the rows are worth more than the border.
 **Sidebar** — org badge (18px, 5px radius, accent fill) then four nav items:
 Tree, Log, Refs, Review, each with a count on the right. Below, a contextual
 section whose heading changes per screen (`Files`, `Symbols`, `Scope`,
-`Threads`).
+`Threads`, `Recent`).
+
+The home screen is the one place the four are replaced rather than filled in:
+git's primitives are questions about a repository, and above one they have
+nothing to point at. It shows the account in the badge and three items — All,
+Repositories, Pull requests — which are views of the same address. Everything
+else about the geography is unchanged, which is the point: the badge, the
+items, the counts and the contextual section sit exactly where they sit on
+every other screen.
+
+**Home** — two tables in one scroller, each with the standard 28px column
+header: `In flight` (pull requests, across every repository, so the row leads
+with the repository name) and `Repositories` (ordered by what was pushed to).
+One filter field above both, which is also where you type `owner/name` to
+open something that is on neither list.
 
 **Header** — breadcrumb left; the object's group and then the chrome, right.
 The object's group is its pills (ref, HEAD SHA, state — `Open`, `1 check
