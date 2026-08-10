@@ -1104,6 +1104,30 @@ function searchNode(numbers: number[], mine: boolean) {
 	};
 }
 
+/* ------------------------------------------ Phase 9: the command palette -- */
+
+interface TreeStubEntry {
+	path: string;
+	type: string;
+	oid: string;
+}
+
+/**
+ * The recursive tree, as REST sends it: every path in the repository in one
+ * response, which is what the palette's file index is. It is built from the
+ * same directory fixtures the tree screen walks — 4,005 files across two
+ * directories — so the palette and the sidebar cannot disagree about what the
+ * repository contains.
+ */
+const GIT_TREE = Object.values(TREES).flatMap((node) =>
+	(node as { entries: TreeStubEntry[] }).entries.map((entry) => ({
+		path: entry.path,
+		type: entry.type,
+		mode: entry.type === 'tree' ? '040000' : '100644',
+		sha: entry.oid
+	}))
+);
+
 interface Body {
 	operationName?: string;
 	variables?: Record<string, string | number | boolean | null>;
@@ -1148,6 +1172,8 @@ interface Stub {
 	readonly owners: Record<string, number>;
 	/** The account's repository list, per cursor. The home screen's walk. */
 	readonly repos: Record<string, number>;
+	/** The palette's path index, per revision. One request, or it is a fan-out. */
+	readonly paths: Record<string, number>;
 	/** Move a pull request's head, as a push does. */
 	push(number: number, oid: string): void;
 	/**
@@ -1181,6 +1207,7 @@ async function signIn(page: Page): Promise<Stub> {
 	const pullFiles: Record<string, number> = {};
 	const owners: Record<string, number> = {};
 	const repos: Record<string, number> = {};
+	const paths: Record<string, number> = {};
 
 	/**
 	 * The head a pull request currently reports. Mutable so a test can push to a
@@ -1454,6 +1481,16 @@ async function signIn(page: Page): Promise<Stub> {
 		await json(route, restCompare(range));
 	});
 
+	// Every path in the repository, in one request — the palette's index. A
+	// regular expression because of the query string, as below.
+	await page.route(/\/repos\/[^/]+\/[^/]+\/git\/trees\//, async (route) => {
+		const url = new URL(route.request().url());
+		const rev = decodeURIComponent(url.pathname.split('/git/trees/').pop() ?? '');
+		paths[rev] = (paths[rev] ?? 0) + 1;
+
+		await json(route, { sha: rev, tree: GIT_TREE, truncated: false });
+	});
+
 	// A pull request's own diff. A regular expression rather than a glob, because
 	// this is the one endpoint we call with a query string.
 	await page.route(/\/repos\/[^/]+\/[^/]+\/pulls\/\d+\/files/, async (route) => {
@@ -1520,6 +1557,7 @@ async function signIn(page: Page): Promise<Stub> {
 		pullFiles,
 		owners,
 		repos,
+		paths,
 		push(number, oid) {
 			heads.set(number, oid);
 		},
@@ -3894,4 +3932,206 @@ test('coming back to the home screen is a local read', async ({ page }) => {
 	await expect(inboxList(page).getByRole('link')).toHaveCount(3);
 	expect(stub.calls.Repos).toBe(1);
 	expect(stub.calls.Inbox).toBe(1);
+});
+
+/* ------------------------------------------ Phase 9: the command palette -- */
+
+function bar(page: Page) {
+	return page.getByRole('dialog', { name: 'Command palette' });
+}
+
+/** ⌘K, wherever you are. The chord is the app's, not a screen's. */
+async function openPalette(page: Page) {
+	await page.keyboard.press('ControlOrMeta+k');
+	await expect(bar(page)).toBeVisible();
+	return bar(page);
+}
+
+/** One group of results, addressed by the heading it sits under. */
+function group(page: Page, name: string) {
+	return bar(page).getByRole('group', { name });
+}
+
+test('⌘K opens the palette anywhere, and the screen behind it stops hearing keys', async ({
+	page
+}) => {
+	await signIn(page);
+	await openPalette(page);
+
+	// `j` is the home screen's own "move down". While the palette is open it is
+	// a character in the query and nothing else — the list behind does not move.
+	await page.keyboard.type('j');
+	await expect(inboxList(page).locator('[aria-current="true"]')).toHaveCount(0);
+
+	await page.keyboard.press('Escape');
+	await expect(bar(page)).toBeHidden();
+
+	// The header's own chrome opens the same overlay.
+	await page.getByTitle('Search and go — ⌘K').click();
+	await expect(bar(page)).toBeVisible();
+});
+
+test('typing owner/name is an address, and enter opens it', async ({ page }) => {
+	await signIn(page);
+	await openPalette(page);
+
+	await page.keyboard.type('octant-user/dotfiles');
+
+	// Above every list, because it is an address rather than a result — the same
+	// call the home screen's filter makes.
+	await expect(group(page, 'Go to').getByRole('option')).toContainText('octant-user/dotfiles');
+
+	await page.keyboard.press('Enter');
+	await expect(page).toHaveURL('/octant-user/dotfiles');
+	await expect(bar(page)).toBeHidden();
+});
+
+test('a file nobody has browsed to is one keystroke and one request away', async ({ page }) => {
+	const stub = await signIn(page);
+	await openRepo(page);
+
+	await openPalette(page);
+	await page.keyboard.type('compiler');
+
+	const files = group(page, 'Files');
+	await expect(files.getByRole('option').first()).toContainText('src/compiler.js');
+
+	// The whole repository is indexed by one request, at the head commit — never
+	// a query per directory, which is the fan-out ARCHITECTURE.md §7 rules out.
+	expect(stub.paths[HEAD]).toBe(1);
+	expect(Object.keys(stub.paths)).toHaveLength(1);
+	// 4,005 blobs across the fixture's two directories, and the footer says so.
+	await expect(bar(page)).toContainText('4,005 files');
+
+	await page.keyboard.press('Enter');
+	await expect(page).toHaveURL('/sveltejs/svelte/blob/HEAD/src/compiler.js');
+	await expect(line(page, 1)).toBeVisible();
+});
+
+test('opening the palette costs nothing — the index is paid for by the first keystroke', async ({
+	page
+}) => {
+	const stub = await signIn(page);
+	await openRepo(page);
+
+	await openPalette(page);
+	// Screens, recent repositories and commands: everything here is already held.
+	await expect(group(page, 'Screens').getByRole('option').first()).toBeVisible();
+	expect(stub.paths).toEqual({});
+
+	await page.keyboard.press('Escape');
+	expect(stub.paths).toEqual({});
+});
+
+test('the index is addressed by the head commit, so a second palette is a local read', async ({
+	page
+}) => {
+	const stub = await signIn(page);
+	await openRepo(page);
+
+	await openPalette(page);
+	await page.keyboard.type('app');
+	await expect(group(page, 'Files').getByRole('option').first()).toContainText('src/App.svelte');
+	await page.keyboard.press('Escape');
+
+	await openPalette(page);
+	await page.keyboard.type('huge');
+	await expect(group(page, 'Files').getByRole('option').first()).toContainText('src/huge.txt');
+
+	expect(stub.paths[HEAD]).toBe(1);
+});
+
+test('the ranking puts the file you named above the four thousand it lives beside', async ({
+	page
+}) => {
+	await signIn(page);
+	await openRepo(page);
+
+	await openPalette(page);
+	// A subsequence, not a substring: this is `src/App.svelte` half-remembered.
+	await page.keyboard.type('sapp');
+
+	await expect(group(page, 'Files').getByRole('option').first()).toContainText('src/App.svelte');
+});
+
+test('# is the pull requests, and #7 is the pull request itself', async ({ page }) => {
+	await signIn(page);
+	await openRepo(page);
+
+	await openPalette(page);
+	await page.keyboard.type('#');
+	await expect(group(page, 'Pull requests').getByRole('option').first()).toContainText(
+		'Rewrite the parser'
+	);
+
+	await page.keyboard.type('7');
+	await expect(group(page, 'Go to').getByRole('option')).toContainText('sveltejs/svelte#7');
+
+	await page.keyboard.press('Enter');
+	await expect(page).toHaveURL('/sveltejs/svelte/pull/7');
+});
+
+test('~ is a commit, and a SHA is an address rather than a search', async ({ page }) => {
+	await signIn(page);
+	await openRepo(page);
+
+	await openPalette(page);
+	await page.keyboard.type(`~${INLINE}`);
+
+	await expect(group(page, 'Go to').getByRole('option')).toContainText(INLINE.slice(0, 12));
+
+	await page.keyboard.press('Enter');
+	await expect(page).toHaveURL(`/sveltejs/svelte/commit/${INLINE}`);
+});
+
+test('the palette leads with what moved while you were away', async ({ page }) => {
+	await signIn(page);
+	// A visit two days old, against a repository the fixture pushed to an hour
+	// ago — Phase 8's comparison, read by the palette rather than by a screen.
+	await seedVisit(page, REPO_VISIT, HEAD);
+	await page.reload();
+	await expect(inboxList(page).getByRole('link').first()).toBeVisible();
+
+	await openPalette(page);
+	await expect(group(page, 'Since your last visit').getByRole('option')).toContainText(
+		'sveltejs/svelte'
+	);
+});
+
+test('arrows move the cursor and symbols are honestly unimplemented', async ({ page }) => {
+	await signIn(page);
+	await openPalette(page);
+
+	const options = bar(page).getByRole('option');
+	await expect(options.first()).toHaveAttribute('aria-selected', 'true');
+
+	await page.keyboard.press('ArrowDown');
+	await expect(options.first()).toHaveAttribute('aria-selected', 'false');
+	await expect(options.nth(1)).toHaveAttribute('aria-selected', 'true');
+
+	// PLAN.md Phase 9 keeps symbols in the grammar and leaves them unbuilt; a
+	// prefix that says so is better than one that quietly means something else.
+	await page.keyboard.type('@parse');
+	await expect(group(page, 'Symbols')).toContainText('No symbol index');
+	await expect(bar(page).getByRole('option')).toHaveCount(0);
+});
+
+test('the pointer moves the cursor, and only when it actually moves', async ({ page }) => {
+	await signIn(page);
+	await openRepo(page);
+
+	// Park the pointer where a row will render, then open the palette over it.
+	// The row underneath must not steal the selection from the top hit: the
+	// overlay appears where the mouse already was, which is not a choice.
+	await page.mouse.move(640, 400);
+	await openPalette(page);
+
+	const options = bar(page).getByRole('option');
+	await expect(options.first()).toHaveAttribute('aria-selected', 'true');
+
+	// Moving it is a choice, and it selects.
+	const third = options.nth(2);
+	await third.hover();
+	await expect(third).toHaveAttribute('aria-selected', 'true');
+	await expect(options.first()).toHaveAttribute('aria-selected', 'false');
 });

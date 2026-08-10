@@ -217,6 +217,16 @@ height, so lanes meet where the rows do.
 `0 16px 48px rgba(0,0,0,.45)`, scrim at 50% black. Query row, grouped
 results, footer showing the prefix grammar and index size.
 
+Rows are the standard 32px and carry an icon, the matched text, a secondary
+field and a trailing note. **The characters you typed are emphasised by weight,
+never by colour** — every colour here already means exactly one thing (§3), and
+"this is why the row matched" is not one of them. Group headings are the same
+11px tertiary label the right panel's blocks use, and the groups never reorder:
+they filter in place, so the geography of an answer is learned once. There is no
+separate hover state — moving the pointer moves the cursor — so exactly one row
+is ever highlighted, and it is always the one `enter` will open. The query row
+names the repository the grammar is scoped to, tertiary and right-aligned.
+
 ---
 
 ## 6. Interaction

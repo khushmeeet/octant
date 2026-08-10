@@ -11,6 +11,7 @@ export {
 	restGet,
 	compare,
 	commitDetail,
+	gitTree,
 	pullFiles,
 	comparisonTruncated,
 	COMPARE_FILE_CAP,
@@ -22,7 +23,9 @@ export {
 	type Comparison,
 	type CommitResponse,
 	type CompareCommit,
-	type DiffFile
+	type DiffFile,
+	type GitTree,
+	type GitTreeEntry
 } from './rest';
 export {
 	ERROR_LABEL,
@@ -78,6 +81,7 @@ export {
 } from './pull';
 export { getPullFiles, pullFilesTruncated, type PullFilesPage } from './pull-files';
 export { getOwners, OWNERS, OWNERS_PATHS, type OwnersFile } from './owners';
+export { getPaths, type PathIndex } from './paths';
 export {
 	getViewerPulls,
 	getViewerRepos,

@@ -138,6 +138,7 @@ what powers "since your last review" without us storing a single blob.
 | Review            | GraphQL `pullRequest` — reviews, `reviewThreads` with line positions, comments, check runs                        |
 | Diff              | REST compare `base...head`, and the PR files endpoint's per-file `patch`                                          |
 | Since last review | REST compare `storedHeadSha...currentHeadSha`                                                                     |
+| Palette, paths    | REST `git/trees/{commit}?recursive=1` — every path in one request, filed under the commit                          |
 | Symbols (palette) | Deferred — see §9                                                                                                 |
 
 One query per screen. Queries are shaped to the screen, not to the domain
@@ -267,8 +268,11 @@ even though there is only one implementation of each.
 **`Source`** — where data comes from. `getRepo`, `getTree`, `getBlob`,
 `getLog`, `getBlame`, `getRefs`, `getPulls`, `getDiff`, `compare` — and, for
 the home screen, `getViewerRepos` and `getViewerPulls`, the only two that name
-an account rather than a repository. Implemented by `GitHubSource`. A future
-`LocalSource` backed by a git sidecar would satisfy the same interface.
+an account rather than a repository. `getPaths` is the palette's, and the only
+read whose answer is a whole repository at once: one recursive tree request
+rather than the query-per-directory that §7 forbids. Implemented by
+`GitHubSource`. A future `LocalSource` backed by a git sidecar would satisfy the
+same interface.
 
 **`Store`** — where data is kept. `get`, `put`, `evict`, plus the visit
 methods. Implemented by `IdbStore`. A future SQLite-backed store swaps in
@@ -283,6 +287,7 @@ GitHub.
 src/lib/
   auth/         token provider, validation, entry gate
   home/         the arrival screen: your repositories, and what needs you
+  palette/      ⌘K: the grammar, the ranking, and the overlay
   source/       Source interface, GitHubSource, GraphQL documents
   store/        Store interface, IdbStore, schema + migrations
   sync/         revalidation ticks, rate-limit accounting, prefetch
@@ -318,6 +323,7 @@ Accepted, with the mitigation or the deferral noted.
 | Limit                           | Consequence                                | Response                                                                                      |
 | ------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------- |
 | No local symbol index           | Palette ranks files and paths, not symbols | Defer. Optionally use GitHub code search (default branch only, separate limit, indexing lag). |
+| Recursive tree cap              | A repository past 100,000 entries or 7MB indexes partially | GitHub flags `truncated`; the palette's footer says `partial` rather than quietly missing files. |
 | No `git log -L`                 | "History of this symbol" cannot ship       | Cut from v1. Needs a local git sidecar.                                                       |
 | No webhooks                     | No push freshness                          | Poll while the app is open; ETags make it cheap.                                              |
 | Patch truncation on large diffs | Very large PRs degrade                     | Detect truncation, show it honestly, link out.                                                |
