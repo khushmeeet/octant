@@ -1104,6 +1104,30 @@ function searchNode(numbers: number[], mine: boolean) {
 	};
 }
 
+/* ------------------------------------------ Phase 9: the command palette -- */
+
+interface TreeStubEntry {
+	path: string;
+	type: string;
+	oid: string;
+}
+
+/**
+ * The recursive tree, as REST sends it: every path in the repository in one
+ * response, which is what the palette's file index is. It is built from the
+ * same directory fixtures the tree screen walks — 4,005 files across two
+ * directories — so the palette and the sidebar cannot disagree about what the
+ * repository contains.
+ */
+const GIT_TREE = Object.values(TREES).flatMap((node) =>
+	(node as { entries: TreeStubEntry[] }).entries.map((entry) => ({
+		path: entry.path,
+		type: entry.type,
+		mode: entry.type === 'tree' ? '040000' : '100644',
+		sha: entry.oid
+	}))
+);
+
 interface Body {
 	operationName?: string;
 	variables?: Record<string, string | number | boolean | null>;
@@ -1148,6 +1172,8 @@ interface Stub {
 	readonly owners: Record<string, number>;
 	/** The account's repository list, per cursor. The home screen's walk. */
 	readonly repos: Record<string, number>;
+	/** The palette's path index, per revision. One request, or it is a fan-out. */
+	readonly paths: Record<string, number>;
 	/** Move a pull request's head, as a push does. */
 	push(number: number, oid: string): void;
 	/**
@@ -1181,6 +1207,7 @@ async function signIn(page: Page): Promise<Stub> {
 	const pullFiles: Record<string, number> = {};
 	const owners: Record<string, number> = {};
 	const repos: Record<string, number> = {};
+	const paths: Record<string, number> = {};
 
 	/**
 	 * The head a pull request currently reports. Mutable so a test can push to a
@@ -1454,6 +1481,16 @@ async function signIn(page: Page): Promise<Stub> {
 		await json(route, restCompare(range));
 	});
 
+	// Every path in the repository, in one request — the palette's index. A
+	// regular expression because of the query string, as below.
+	await page.route(/\/repos\/[^/]+\/[^/]+\/git\/trees\//, async (route) => {
+		const url = new URL(route.request().url());
+		const rev = decodeURIComponent(url.pathname.split('/git/trees/').pop() ?? '');
+		paths[rev] = (paths[rev] ?? 0) + 1;
+
+		await json(route, { sha: rev, tree: GIT_TREE, truncated: false });
+	});
+
 	// A pull request's own diff. A regular expression rather than a glob, because
 	// this is the one endpoint we call with a query string.
 	await page.route(/\/repos\/[^/]+\/[^/]+\/pulls\/\d+\/files/, async (route) => {
@@ -1520,6 +1557,7 @@ async function signIn(page: Page): Promise<Stub> {
 		pullFiles,
 		owners,
 		repos,
+		paths,
 		push(number, oid) {
 			heads.set(number, oid);
 		},
@@ -1541,9 +1579,27 @@ function listing(page: Page) {
 	return page.getByRole('navigation', { name: 'Directory listing' });
 }
 
-async function openRepo(page: Page, at = '/sveltejs/svelte') {
+/**
+ * The Tree screen, which is a screen about a directory and lives at
+ * `/tree/{rev}` at every depth including the root. The repository's own address
+ * is the Summary — `openSummary` below.
+ */
+async function openRepo(page: Page, at = '/sveltejs/svelte/tree/HEAD') {
 	await page.goto(at);
 	await expect(listing(page).getByRole('link', { name: 'README.md' })).toBeVisible();
+}
+
+/** The README, as its own region — the summary's description is not part of it. */
+function readme(page: Page) {
+	return page.getByRole('region', { name: 'README.md' });
+}
+
+/** The repository itself: what it is, what just landed, and its README. */
+async function openSummary(page: Page, at = '/sveltejs/svelte') {
+	await page.goto(at);
+	await expect(
+		page.getByRole('main').getByRole('heading', { name: 'svelte', exact: true })
+	).toBeVisible();
 }
 
 /** The home screen's two lists. Rows are links because they go somewhere. */
@@ -1752,12 +1808,14 @@ test('one address is not fetched twice while it is in the air', async ({ page })
 
 test('a second load paints from IndexedDB with no network call', async ({ page }) => {
 	const stub = await signIn(page);
-	await openRepo(page);
+	// The Summary reads all three of them — the repository, the root listing and
+	// the README's blob — which is what makes it the screen to prove the cache on.
+	await openSummary(page);
 
 	// The README rendering is the signal that its blob reached IndexedDB —
 	// `settle()` writes before it resolves, and the resolve is what sets `data`.
 	// Reloading before that would discard a request the next load then repeats.
-	await expect(page.getByRole('main').getByRole('heading', { name: 'svelte' })).toBeVisible();
+	await expect(readme(page).getByRole('heading', { name: 'svelte' })).toBeVisible();
 
 	const repoCalls = stub.calls.Repo;
 	const treeCalls = stub.calls.Tree;
@@ -1766,8 +1824,7 @@ test('a second load paints from IndexedDB with no network call', async ({ page }
 	// A new document, a new store instance, nothing in memory. Only IndexedDB
 	// survives, so anything that paints now came off disk.
 	await page.reload();
-	await expect(listing(page).getByRole('link', { name: 'README.md' })).toBeVisible();
-	await expect(page.getByRole('heading', { name: 'svelte', exact: true })).toBeVisible();
+	await expect(readme(page).getByRole('heading', { name: 'svelte', exact: true })).toBeVisible();
 
 	expect(stub.calls.Repo).toBe(repoCalls);
 	expect(stub.calls.Tree).toBe(treeCalls);
@@ -1795,7 +1852,7 @@ test('a listing addressed by SHA is never asked for twice', async ({ page }) => 
 
 test('a failed revalidation keeps the cached render on screen', async ({ page }) => {
 	const stub = await signIn(page);
-	await openRepo(page);
+	await openSummary(page);
 
 	// Past the freshness window, so coming back revalidates rather than reading
 	// straight through — and the revalidation is the thing that fails.
@@ -1806,8 +1863,7 @@ test('a failed revalidation keeps the cached render on screen', async ({ page })
 	await page.reload();
 
 	await expect(page.getByRole('status')).toContainText('Showing what was cached');
-	await expect(listing(page).getByRole('link', { name: 'README.md' })).toBeVisible();
-	await expect(page.getByRole('main').getByRole('heading', { name: 'svelte' })).toBeVisible();
+	await expect(readme(page).getByRole('heading', { name: 'svelte' })).toBeVisible();
 });
 
 test('a database written by an earlier phase is migrated in place', async ({ page }) => {
@@ -1907,8 +1963,8 @@ test('a full immutable store is evicted oldest-first', async ({ page }) => {
 
 	// The first write of the session triggers the pressure check. The README is
 	// blob-addressed, so it lands in the immutable store.
-	await openRepo(page);
-	await expect(page.getByRole('heading', { name: 'svelte', exact: true })).toBeVisible();
+	await openSummary(page);
+	await expect(readme(page).getByRole('heading', { name: 'svelte', exact: true })).toBeVisible();
 
 	const survivors = await page.evaluate(async () => {
 		const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -1938,7 +1994,9 @@ test('a full immutable store is evicted oldest-first', async ({ page }) => {
 
 /* --------------------------------------------------- Phase 3: the screen -- */
 
-test('the tree screen carries the repository, its clone URLs and its README', async ({ page }) => {
+test('the tree screen carries the directory, and nothing that is not about it', async ({
+	page
+}) => {
 	await signIn(page);
 	await openRepo(page);
 
@@ -1946,14 +2004,6 @@ test('the tree screen carries the repository, its clone URLs and its README', as
 	await expect(page.getByRole('banner').getByText('sveltejs')).toBeVisible();
 	await expect(page.getByRole('banner').getByText('main', { exact: true })).toBeVisible();
 	await expect(page.getByRole('banner').getByText('0f1a2b3')).toBeVisible();
-
-	// Clone strip: two URLs, labelled by what they let you do.
-	await expect(page.getByLabel('Copy the read-only clone URL')).toContainText(
-		'https://github.com/sveltejs/svelte.git'
-	);
-	await expect(page.getByLabel('Copy the read/write clone URL')).toContainText(
-		'git@github.com:sveltejs/svelte.git'
-	);
 
 	// The right panel keeps its three blocks, in order, whatever is in them.
 	const panel = page.getByRole('complementary', { name: 'Context' });
@@ -1967,6 +2017,84 @@ test('the tree screen carries the repository, its clone URLs and its README', as
 	await expect(sidebar.getByText('12,345')).toBeVisible();
 	await expect(sidebar.getByText('942')).toBeVisible();
 	await expect(sidebar.getByText('7', { exact: true })).toBeVisible();
+
+	// Three things that were here and are about the repository rather than about
+	// this directory: they belong to the Summary now, and the sidebar's second
+	// copy of the tree belongs nowhere.
+	await expect(page.getByLabel('Copy the read-only clone URL')).toHaveCount(0);
+	await expect(
+		page.getByRole('main').getByRole('heading', { name: 'svelte', exact: true })
+	).toHaveCount(0);
+	await expect(sidebar.getByRole('button', { name: /^Expand/ })).toHaveCount(0);
+});
+
+test('a repository opens on what it is, not on one of its directories', async ({ page }) => {
+	const stub = await signIn(page);
+	await openSummary(page);
+
+	// The breadcrumb names the repository and stops there — there is no path.
+	await expect(page.getByRole('banner').getByText('sveltejs')).toBeVisible();
+	await expect(page.getByRole('banner').getByText('main', { exact: true })).toBeVisible();
+
+	// What it is, and what just landed: the head commit, readable, with its SHA
+	// opening the commit rather than sitting in a pill.
+	const main = page.getByRole('main');
+	await expect(main).toContainText('web development for the rest of us');
+	await expect(main).toContainText('stop the compiler eating its own tail');
+	await expect(main.getByRole('link', { name: '0f1a2b3' })).toHaveAttribute(
+		'href',
+		`/sveltejs/svelte/commit/${HEAD}`
+	);
+
+	// The clone strip is about the repository, so this is where it lives now.
+	await expect(page.getByLabel('Copy the read-only clone URL')).toContainText(
+		'https://github.com/sveltejs/svelte.git'
+	);
+
+	// And no listing: the tree is the screen next door.
+	await expect(listing(page)).toHaveCount(0);
+
+	// Two reads, and the second is the one the tree screen renders from — so
+	// walking next door is a local read.
+	expect(stub.calls.Repo).toBe(1);
+	expect(stub.trees['']).toBe(1);
+
+	const sidebar = page.getByRole('navigation', { name: 'Primary' });
+	await sidebar.getByRole('link', { name: /^Tree/ }).click();
+	await expect(page).toHaveURL('/sveltejs/svelte/tree/HEAD');
+	await expect(listing(page).getByRole('link', { name: 'README.md' })).toBeVisible();
+	expect(stub.trees['']).toBe(1);
+});
+
+test('the badge is the way back to the repository, and says when you are there', async ({
+	page
+}) => {
+	await signIn(page);
+	await openRepo(page);
+
+	const sidebar = page.getByRole('navigation', { name: 'Primary' });
+	const badge = sidebar.getByRole('link', { name: 'sveltejs/svelte' });
+
+	// On the tree, the badge is a link out of it and is not current.
+	await expect(badge).not.toHaveAttribute('aria-current', 'page');
+
+	await badge.click();
+	await expect(page).toHaveURL('/sveltejs/svelte');
+	await expect(badge).toHaveAttribute('aria-current', 'page');
+});
+
+test('the owner in the breadcrumb goes home', async ({ page }) => {
+	await signIn(page);
+	// A screen deep enough that the owner is not the crumb you are on.
+	await page.goto('/sveltejs/svelte/tree/HEAD/src');
+	await expect(listing(page).getByRole('link', { name: 'compiler.js' })).toBeVisible();
+
+	// The first crumb is the account, and the account's screen is the home
+	// screen: ARCHITECTURE.md §1 rules out owner and organisation pages, so the
+	// segment either goes to the one screen that is about you or is dead text.
+	await page.getByRole('banner').getByRole('link', { name: 'sveltejs', exact: true }).click();
+	await expect(page).toHaveURL('/');
+	await expect(inboxList(page).getByRole('link').first()).toBeVisible();
 });
 
 test('the verbs live in the header now, beside the pills they act on', async ({ page }) => {
@@ -2005,7 +2133,7 @@ test('the context panel collapses, and stays collapsed across a reload', async (
 
 	// It is a preference, not a per-screen mode: it survives a navigation and a
 	// reload, which is the whole reason it is written down.
-	await page.getByRole('link', { name: 'src', exact: true }).first().click();
+	await listing(page).getByRole('link', { name: 'src' }).click();
 	await expect(context(page)).toHaveCount(0);
 
 	await page.reload();
@@ -2018,9 +2146,9 @@ test('the context panel collapses, and stays collapsed across a reload', async (
 
 test('the README renders as markdown, and its raw HTML does not survive', async ({ page }) => {
 	await signIn(page);
-	await openRepo(page);
+	await openSummary(page);
 
-	const main = page.getByRole('main');
+	const main = readme(page);
 	await expect(main.getByRole('heading', { name: 'svelte', exact: true })).toBeVisible();
 	await expect(main.getByText('rest of us')).toBeVisible();
 	await expect(main.getByText('bun install')).toBeVisible();
@@ -2032,6 +2160,10 @@ test('the README renders as markdown, and its raw HTML does not survive', async 
 
 	// The centred logo is decoration, and DESIGN.md §8 does not want it.
 	await expect(main.getByText('a centred logo')).toHaveCount(0);
+
+	// Full width here, where the README is the screen rather than a note under a
+	// listing — the 76-character measure is for prose beside something else.
+	await expect(main.locator('.md')).toHaveClass(/wide/);
 });
 
 test('j and k move the selection and enter opens the row', async ({ page }) => {
@@ -2054,13 +2186,13 @@ test('j and k move the selection and enter opens the row', async ({ page }) => {
 	await expect(listing(page).getByRole('link', { name: 'compiler.js' })).toBeVisible();
 
 	// A subdirectory offers the way back out as a row, so the keyboard reaches
-	// it. It lands on the repository's canonical front page, because the default
-	// branch is addressed by omission rather than by name.
+	// it. It lands on the tree's own root — `/tree/HEAD`, not the repository's
+	// front page, which is the Summary and is a different screen.
 	await expect(listing(page).getByRole('link', { name: '..' })).toBeVisible();
 	await expect(listing(page).locator('[aria-current]')).toHaveCount(0);
 	await page.keyboard.press('j');
 	await page.keyboard.press('Enter');
-	await expect(page).toHaveURL('/sveltejs/svelte');
+	await expect(page).toHaveURL('/sveltejs/svelte/tree/HEAD');
 });
 
 test('slash focuses the filter and filtering narrows the listing', async ({ page }) => {
@@ -2113,21 +2245,23 @@ test('hovering a directory warms it, so opening it costs nothing', async ({ page
 	expect(stub.trees.src).toBe(1);
 });
 
-test('the sidebar tree expands, and shares the listing it already paid for', async ({ page }) => {
+test('the sidebar carries no second copy of the tree, on either screen', async ({ page }) => {
 	const stub = await signIn(page);
 	await openRepo(page);
 
+	// The listing is one read, not two: the sidebar used to render the root tree
+	// beside it, and ⌘K — which indexes every path in the repository — is what
+	// made 196px of it redundant.
 	const sidebar = page.getByRole('navigation', { name: 'Primary' });
+	await expect(sidebar.getByText('Files')).toHaveCount(0);
+	await expect(sidebar.getByRole('button', { name: /^Expand/ })).toHaveCount(0);
 	expect(stub.trees['']).toBe(1);
 
-	await sidebar.getByRole('button', { name: 'Expand src' }).click();
-	await expect(sidebar.getByRole('link', { name: 'compiler.js' })).toBeVisible();
-	expect(stub.trees.src).toBe(1);
-
-	// Opening the same directory in the main column is now a local read.
+	// Nor on the file screen, which carried the same tree.
 	await listing(page).getByRole('link', { name: 'src' }).click();
-	await expect(listing(page).getByRole('link', { name: 'compiler.js' })).toBeVisible();
-	expect(stub.trees.src).toBe(1);
+	await listing(page).getByRole('link', { name: 'compiler.js' }).click();
+	await expect(line(page, 1)).toBeVisible();
+	await expect(sidebar.getByText('Files')).toHaveCount(0);
 });
 
 test('a tree addressed by SHA is permanent, however stale the branch has gone', async ({
@@ -2412,9 +2546,9 @@ test('a tree address that names a file lands on the file screen', async ({ page 
 
 test('a readme code fence is read by the same scanner as the file screen', async ({ page }) => {
 	await signIn(page);
-	await openRepo(page);
+	await openSummary(page);
 
-	const main = page.getByRole('main');
+	const main = readme(page);
 	await expect(main.getByText('bun install')).toBeVisible();
 	await expect(main.locator('pre .cm')).toHaveText('# get started');
 });
@@ -2773,8 +2907,7 @@ test('a further page is fetched once, and walking back down it is free', async (
 	// Leave and come back, then walk the whole way down again. The first page is
 	// inside its window and each page behind it is filed under the cursor that
 	// fetched it, so the second walk costs nothing at all.
-	await page.goto('/sveltejs/svelte');
-	await expect(listing(page).getByRole('link', { name: 'README.md' })).toBeVisible();
+	await openRepo(page);
 	await openLog(page);
 
 	await page.getByRole('button', { name: 'Load more' }).click();
@@ -3536,12 +3669,6 @@ test('the dots on a listing are projected from that one comparison', async ({ pa
 		0
 	);
 
-	// The sidebar's tree is dotted from the same answer, not a second one.
-	const tree = page.getByRole('navigation', { name: 'Primary' });
-	await expect(
-		tree.getByRole('img', { name: /changed since your last visit/ }).first()
-	).toBeVisible();
-
 	expect(Object.keys(stub.compares)).toHaveLength(1);
 });
 
@@ -3894,4 +4021,224 @@ test('coming back to the home screen is a local read', async ({ page }) => {
 	await expect(inboxList(page).getByRole('link')).toHaveCount(3);
 	expect(stub.calls.Repos).toBe(1);
 	expect(stub.calls.Inbox).toBe(1);
+});
+
+/* ------------------------------------------ Phase 9: the command palette -- */
+
+function bar(page: Page) {
+	return page.getByRole('dialog', { name: 'Command palette' });
+}
+
+/** ⌘K, wherever you are. The chord is the app's, not a screen's. */
+async function openPalette(page: Page) {
+	await page.keyboard.press('ControlOrMeta+k');
+	await expect(bar(page)).toBeVisible();
+	return bar(page);
+}
+
+/** One group of results, addressed by the heading it sits under. */
+function group(page: Page, name: string) {
+	return bar(page).getByRole('group', { name });
+}
+
+/**
+ * Every list the palette draws on has arrived.
+ *
+ * The account's pull requests come off IndexedDB a beat after the overlay
+ * opens, and a group that lands *above* the cursor moves what is under it — the
+ * palette follows the row rather than the index, which is right and is exactly
+ * what makes an assertion about position race the data. So a test that talks
+ * about the nth row waits for the nth row to mean something.
+ */
+async function settled(page: Page) {
+	await expect(group(page, 'Pull requests').getByRole('option')).toHaveCount(3);
+}
+
+test('⌘K opens the palette anywhere, and the screen behind it stops hearing keys', async ({
+	page
+}) => {
+	await signIn(page);
+	await openPalette(page);
+
+	// `j` is the home screen's own "move down". While the palette is open it is
+	// a character in the query and nothing else — the list behind does not move.
+	await page.keyboard.type('j');
+	await expect(inboxList(page).locator('[aria-current="true"]')).toHaveCount(0);
+
+	await page.keyboard.press('Escape');
+	await expect(bar(page)).toBeHidden();
+
+	// The header's own chrome opens the same overlay.
+	await page.getByTitle('Search and go — ⌘K').click();
+	await expect(bar(page)).toBeVisible();
+});
+
+test('typing owner/name is an address, and enter opens it', async ({ page }) => {
+	await signIn(page);
+	await openPalette(page);
+
+	await page.keyboard.type('octant-user/dotfiles');
+
+	// Above every list, because it is an address rather than a result — the same
+	// call the home screen's filter makes.
+	await expect(group(page, 'Go to').getByRole('option')).toContainText('octant-user/dotfiles');
+
+	await page.keyboard.press('Enter');
+	await expect(page).toHaveURL('/octant-user/dotfiles');
+	await expect(bar(page)).toBeHidden();
+});
+
+test('a file nobody has browsed to is one keystroke and one request away', async ({ page }) => {
+	const stub = await signIn(page);
+	await openRepo(page);
+
+	await openPalette(page);
+	await page.keyboard.type('compiler');
+
+	const files = group(page, 'Files');
+	await expect(files.getByRole('option').first()).toContainText('src/compiler.js');
+
+	// The whole repository is indexed by one request, at the head commit — never
+	// a query per directory, which is the fan-out ARCHITECTURE.md §7 rules out.
+	expect(stub.paths[HEAD]).toBe(1);
+	expect(Object.keys(stub.paths)).toHaveLength(1);
+	// 4,005 blobs across the fixture's two directories, and the footer says so.
+	await expect(bar(page)).toContainText('4,005 files');
+
+	await page.keyboard.press('Enter');
+	await expect(page).toHaveURL('/sveltejs/svelte/blob/HEAD/src/compiler.js');
+	await expect(line(page, 1)).toBeVisible();
+});
+
+test('opening the palette costs nothing — the index is paid for by the first keystroke', async ({
+	page
+}) => {
+	const stub = await signIn(page);
+	await openRepo(page);
+
+	await openPalette(page);
+	// Screens, recent repositories and commands: everything here is already held.
+	await expect(group(page, 'Screens').getByRole('option').first()).toBeVisible();
+	expect(stub.paths).toEqual({});
+
+	await page.keyboard.press('Escape');
+	expect(stub.paths).toEqual({});
+});
+
+test('the index is addressed by the head commit, so a second palette is a local read', async ({
+	page
+}) => {
+	const stub = await signIn(page);
+	await openRepo(page);
+
+	await openPalette(page);
+	await page.keyboard.type('app');
+	await expect(group(page, 'Files').getByRole('option').first()).toContainText('src/App.svelte');
+	await page.keyboard.press('Escape');
+
+	await openPalette(page);
+	await page.keyboard.type('huge');
+	await expect(group(page, 'Files').getByRole('option').first()).toContainText('src/huge.txt');
+
+	expect(stub.paths[HEAD]).toBe(1);
+});
+
+test('the ranking puts the file you named above the four thousand it lives beside', async ({
+	page
+}) => {
+	await signIn(page);
+	await openRepo(page);
+
+	await openPalette(page);
+	// A subsequence, not a substring: this is `src/App.svelte` half-remembered.
+	await page.keyboard.type('sapp');
+
+	await expect(group(page, 'Files').getByRole('option').first()).toContainText('src/App.svelte');
+});
+
+test('# is the pull requests, and #7 is the pull request itself', async ({ page }) => {
+	await signIn(page);
+	await openRepo(page);
+
+	await openPalette(page);
+	await page.keyboard.type('#');
+	await expect(group(page, 'Pull requests').getByRole('option').first()).toContainText(
+		'Rewrite the parser'
+	);
+
+	await page.keyboard.type('7');
+	await expect(group(page, 'Go to').getByRole('option')).toContainText('sveltejs/svelte#7');
+
+	await page.keyboard.press('Enter');
+	await expect(page).toHaveURL('/sveltejs/svelte/pull/7');
+});
+
+test('~ is a commit, and a SHA is an address rather than a search', async ({ page }) => {
+	await signIn(page);
+	await openRepo(page);
+
+	await openPalette(page);
+	await page.keyboard.type(`~${INLINE}`);
+
+	await expect(group(page, 'Go to').getByRole('option')).toContainText(INLINE.slice(0, 12));
+
+	await page.keyboard.press('Enter');
+	await expect(page).toHaveURL(`/sveltejs/svelte/commit/${INLINE}`);
+});
+
+test('the palette leads with what moved while you were away', async ({ page }) => {
+	await signIn(page);
+	// A visit two days old, against a repository the fixture pushed to an hour
+	// ago — Phase 8's comparison, read by the palette rather than by a screen.
+	await seedVisit(page, REPO_VISIT, HEAD);
+	await page.reload();
+	await expect(inboxList(page).getByRole('link').first()).toBeVisible();
+
+	await openPalette(page);
+	await expect(group(page, 'Since your last visit').getByRole('option')).toContainText(
+		'sveltejs/svelte'
+	);
+});
+
+test('arrows move the cursor and symbols are honestly unimplemented', async ({ page }) => {
+	await signIn(page);
+	await openPalette(page);
+	await settled(page);
+
+	const options = bar(page).getByRole('option');
+	await expect(options.first()).toHaveAttribute('aria-selected', 'true');
+
+	await page.keyboard.press('ArrowDown');
+	await expect(options.first()).toHaveAttribute('aria-selected', 'false');
+	await expect(options.nth(1)).toHaveAttribute('aria-selected', 'true');
+
+	// PLAN.md Phase 9 keeps symbols in the grammar and leaves them unbuilt; a
+	// prefix that says so is better than one that quietly means something else.
+	await page.keyboard.type('@parse');
+	await expect(group(page, 'Symbols')).toContainText('No symbol index');
+	await expect(bar(page).getByRole('option')).toHaveCount(0);
+});
+
+test('the pointer moves the cursor, and only when it actually moves', async ({ page }) => {
+	await signIn(page);
+	await openRepo(page);
+
+	// Park the pointer where a row will render, then open the palette over it.
+	// The row underneath must not steal the selection from the top hit: the
+	// overlay appears where the mouse already was, which is not a choice.
+	await page.mouse.move(640, 400);
+	await openPalette(page);
+	await settled(page);
+
+	const options = bar(page).getByRole('option');
+	await expect(options.first()).toHaveAttribute('aria-selected', 'true');
+
+	// Moving it is a choice, and it selects. A point inside the row rather than
+	// `hover()`, which would be a no-op if the mouse were parked on that pixel
+	// already — which is the very case being tested above.
+	const third = options.nth(2);
+	const box = await third.boundingBox();
+	await page.mouse.move((box?.x ?? 0) + 12, (box?.y ?? 0) + 6);
+	await expect(third).toHaveAttribute('aria-selected', 'true');
+	await expect(options.first()).toHaveAttribute('aria-selected', 'false');
 });

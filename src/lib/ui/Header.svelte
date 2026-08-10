@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { palette } from './palette.svelte';
 	import Icon from './Icon.svelte';
 	import Pill from './Pill.svelte';
 	import { panel } from './panel.svelte';
@@ -91,7 +92,7 @@
 	</div>
 
 	<div class="r">
-		<Pill title="Command palette — arrives in Phase 9">
+		<Pill onclick={() => palette.show()} title="Search and go — ⌘K">
 			<Icon name="search" />⌘K
 		</Pill>
 		<Pill

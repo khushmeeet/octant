@@ -18,7 +18,7 @@ got to.
 | 6 — Refs | **Done** | 2026-08-08 |
 | 7 — Review | **Done** | 2026-08-09 |
 | 8 — Since your last visit | **Done** | 2026-08-09 |
-| 9 — Command palette | Not started | — |
+| 9 — Command palette | **Done** | 2026-08-10 |
 | 10 — OAuth | Not started | — |
 
 ---
@@ -1919,6 +1919,322 @@ list would be the kind of bug you would not notice for a week.
 
 ---
 
+## Phase 9 — Command palette
+
+**Done when:** you stop using the sidebar tree to open files. ✅ — on a stubbed
+repository of four thousand files, and pinned by tests. The live-token
+qualifier under **Verification** still stands.
+
+### What was built
+
+One overlay, on every screen, and the one read the app did not already have.
+
+| File | Role |
+|---|---|
+| `palette/Palette.svelte` | the mount point and the ⌘K chord — one listener while closed |
+| `palette/Bar.svelte` | the overlay: query row, grouped results, footer |
+| `palette/results.svelte.ts` | what it shows — the groups, and the reads behind them |
+| `palette/grammar.ts` | the prefix grammar, and what a typed line *addresses* |
+| `palette/rank.ts` | subsequence matching, scoring, and where the characters landed |
+| `palette/groups.ts` | a row earns its place once |
+| `ui/palette.svelte.ts` | whether it is open, the chord, and where the pointer was |
+| `palette/types.ts` | `Result` and `Group` |
+| `source/paths.ts` | the path index — every path in a repository, in one request |
+
+Reworked: `rest.ts` gained `gitTree`, the recursive tree read; `Source` grew
+from fifteen methods to sixteen; `policy.ts` gained `FRESHNESS.paths`;
+`app.css` gained `--radius-overlay`; the header's ⌘K pill stopped being a label
+and became the button it looked like; the layout mounts the palette inside the
+signed-in branch.
+
+**Everything in it was already on disk except one read.** The repositories and
+the pull requests are the home screen's two queries, the visit records are Phase
+8's, the recent list is what the tick has been pinning since Phase 8 and which
+`recent.svelte.ts` said in a comment would be read again here. The only new read
+is the file index, and it is the one thing this phase had to decide.
+
+### Decisions
+
+**Files are one request, not a walk — and the request is REST.** ARCHITECTURE.md
+§7's hard rule is that no operation may fan out across a repository, and it is
+the reason a file finder could not be built on the tree query: GraphQL has no
+recursive tree, so asking it for every path is a query per directory. REST's
+`git/trees/{rev}?recursive=1` is a different shape entirely — one bounded
+request whose cost does not grow with how deep the repository is nested, and
+which GitHub caps itself and flags with `truncated`. That is the whole reason
+the group exists at all, and it is why §7's rule survives the phase intact.
+
+**The index is paid for by the first keystroke and filed under a commit.**
+Nothing fetches it on open: ⌘K then `esc` costs zero requests, which matters
+because the chord is now on every screen and will be pressed by accident. On the
+first character the palette asks — at the head commit's SHA wherever the summary
+knows one, which puts the largest payload in the app in the *permanent* store
+rather than on a freshness window. A repository whose HEAD has not moved is
+indexed once, ever.
+
+**`/` is paths, not content.** PLAN.md wrote the prefix as "content", which can
+only mean GitHub's code search: a separate index, a separate rate limit, default
+branch only, and lagging behind pushes (ARCHITECTURE.md §11). Three caveats is
+too many for a prefix that has to feel instant, and what the app already holds
+is every path. So `/` narrows to the file index, and content search stays out
+until it can be answered without the asterisks. `@` is the plan's other reserved
+prefix and is left exactly as the plan asks — in the grammar, and honest about
+having no index behind it.
+
+**An address is not a result.** `owner/name`, `owner/name#412`, `#412`, a
+40-character SHA, a pasted github.com URL: each of these is a thing you can name
+exactly, so it goes in a `Go to` group above every list rather than being ranked
+among them. That is the same call the home screen's filter already makes, and
+this is where the second half of it landed — the palette knows which repository
+you are in, so `#412` and a bare SHA mean something the home screen could not
+make them mean.
+
+**Match, then tighten.** The ranker proves the characters are present in order,
+then slides each one as far right as it will go. `app` against
+`src/lib/App.svelte` stops being three scattered letters and becomes a run
+inside the file's own name — which is what makes a four-thousand file index
+usable with three characters. Runs, word boundaries and camel humps score; the
+starting position and the leftover length are penalties. Emphasis on the row is
+where the characters actually landed, never a re-scan.
+
+**Groups hold still.** They filter and re-rank inside themselves and never move:
+addresses, then what moved while you were away, then files, pull requests,
+recent, repositories, screens, commands. It is the right panel's argument
+(ARCHITECTURE.md §2) applied to a list that changes on every keystroke — a
+palette whose headings reorder has to be read, and one whose geography is fixed
+can be aimed at. A row that could appear in two groups appears in the first,
+which is the most specific one.
+
+**The open/close state lives in `ui/`, and it is not filing.** It sat with its
+components as `palette/palette.svelte.ts` until that pairing with
+`palette/Palette.svelte` turned out to be unbuildable on a case-insensitive
+filesystem: `./palette.svelte` resolves to the *component* on macOS and Windows
+and to the module on Linux, so the app failed to boot with
+`does not provide an export named 'isPaletteChord'` on two platforms out of
+three while `check`, `lint`, `build` and 102 e2e tests passed on the third. The
+rule it leaves behind — **no component may share a base name with a
+`.svelte.ts` module in the same directory** — is the kind a repository only
+learns once. It also belongs in `ui/` on the merits: this is chrome state, the
+third of the trio `Header.svelte` reads beside `panel` and `theme`, and moving
+it means the shell no longer imports from a feature directory.
+
+**Keys stop at the query row.** Every screen listens on the window for `j`, `k`,
+`enter` and `esc`, and the home screen opens its first row on `enter` even while
+you are typing in its filter. So the palette stops propagation on every keydown
+it sees rather than trusting nine screens to check whether an overlay is up —
+and handles the chord itself, because ⌘K has to close what it opened.
+
+**The pointer moves the cursor only when it moves.** The overlay opens wherever
+the mouse was last left, so `pointerenter` would hand the selection to whatever
+row happened to render underneath it — the suite caught exactly that, as a first
+row that was not selected. `pointermove` is most of the fix and is the honest
+model: moving the pointer is a choice, having left it somewhere is not.
+
+It is not all of the fix, because **the browser synthesises a pointer move when
+content appears under a stationary cursor**, which is this exact situation. The
+obvious test for a synthetic move is `movementX`/`movementY`, and it is the
+wrong one: those are zero for synthesised input of every kind, including a real
+automated move, so the guard also rejected the thing it was meant to allow.
+What works is knowing where the pointer already was — the palette's module
+records it on a passive window listener while the overlay is closed, and a row
+event that arrives at that same pixel is the page moving rather than the mouse.
+With that, hover and selection are the same state, so the row's hover style went
+away rather than drawing a second highlight next to the real one.
+
+**The cursor holds an id, not an index.** Rows arrive as their lists do — the
+inbox a moment after opening, the file index a moment after the first keystroke
+— and a group that fills in above the cursor moves what is under it. Once you
+have deliberately moved the cursor it remembers the row rather than the
+position, so `enter` opens what you were looking at. Typing clears it, because a
+new question has a new best answer and that answer is the top row.
+
+### Deliberately deferred
+
+- **Symbols.** In the grammar, unimplemented, and saying so — PLAN.md Phase 9
+  asks for exactly this. ARCHITECTURE.md §11 is the reason: an index of a
+  repository's symbols is a per-file read of every file, which is the fan-out §7
+  forbids, and GitHub exposes no symbol API to borrow one from.
+- **Content search.** See `/` above. It needs GitHub's code-search index, which
+  is a separate quota and covers the default branch only.
+- **The index does not page.** GitHub truncates a recursive tree past 100,000
+  entries or 7 MB and says so; we carry `truncated` and the footer prints
+  `partial`. Paging it would mean walking sub-trees, which is the fan-out again.
+- **Cross-repository file search.** The index is per repository and per
+  revision, because that is what one request buys. Repositories and pull
+  requests are already cross-repository, which is the half that matters from the
+  home screen.
+- **No fuzzy matching on pull request bodies or commit messages.** Titles and
+  identifiers only. Searching bodies means fetching bodies, and the inbox
+  deliberately does not.
+- **The palette does not remember your last query.** Reopening is a fresh
+  question. If that turns out to be wrong it is one line.
+
+### Verification
+
+`bun run check` (0 errors), `bun run lint` and `bun run build` all pass.
+`npx playwright test` — 100 passed, in about 1.3 minutes.
+
+Eleven tests are new, and the phase is in these:
+
+- **⌘K opens the palette anywhere**, `j` typed into it does not move the list
+  behind it, `esc` closes it, and the header's own ⌘K opens the same overlay;
+- typing **`owner/name` is an address**: it appears under `Go to` and `enter`
+  opens it, including a repository the account is not a member of;
+- **a file nobody has browsed to is one keystroke and one request away** —
+  `compiler` finds `src/compiler.js` among 4,005 files, the whole index is one
+  request at the head commit, the footer says `4,005 files`, and `enter` lands
+  on the file screen;
+- **opening the palette costs nothing**: the screens and recent repositories
+  render and the index is not fetched, before or after `esc`;
+- the **index is addressed by the head commit**, so closing and reopening the
+  palette and searching for something else is a local read;
+- the **ranking** puts `src/App.svelte` first for `sapp` — a subsequence, not a
+  substring, against four thousand files it lives beside;
+- **`#` is the pull requests and `#7` is the pull request**: the prefix lists
+  the inbox, the number becomes an address, and `enter` opens the review;
+- **`~` is a commit**, and a SHA is an address rather than a search;
+- the palette **leads with what moved while you were away**, from Phase 8's
+  records and no request;
+- **arrows move the cursor** and `@` says there is no symbol index rather than
+  showing an empty group;
+- the **pointer moves the cursor only when it actually moves** — a row rendering
+  under a parked mouse does not steal the selection, and hovering one does.
+
+Both themes checked by screenshot at 1280px — the empty palette, a file search
+mid-index and a pull request search — along with the query row's scoped
+repository label and the footer's grammar row.
+
+**Still not run against live GitHub.** One read is new and it has not met a real
+token: `git/trees/{rev}?recursive=1`. Two things about it are worth watching on
+the first afternoon there is one. Its `truncated` flag is the only signal that
+an index is partial, and a repository large enough to trip it is exactly the one
+where a file finder matters most — the footer prints `partial` but nothing has
+seen it do so. And the revision we hand it is a *commit* SHA rather than a tree
+SHA, which git resolves and GitHub documents, but which no response has
+confirmed; if the index ever comes back empty on a real repository, that is the
+first thing to check.
+
+---
+
+## The summary screen — one screen, one object
+
+**Done when:** a repository opens on what it is rather than on one of its
+directories, and the tree is a screen about a directory. ✅
+
+### What changed
+
+Two deletions and one new screen, and the first deletion is what paid for the
+other two.
+
+| File | Role |
+|---|---|
+| `summary/SummaryScreen.svelte` | the repository's own screen: what it is, what just landed, its README |
+| `ui/FileTree.svelte` | **deleted** |
+| `ui/FileTreeNode.svelte` | **deleted** |
+
+Reworked: `[owner]/[name]/+page.svelte` renders the Summary rather than the
+Tree; `treeHref(repo, null)` is `/tree/HEAD` rather than the repository's front
+page; `TreeScreen` lost the README, the clone strip and the sidebar tree;
+`FileScreen` lost the sidebar tree; `Sidebar`'s Tree item points at `/tree/HEAD`
+and its badge lights up on the Summary; `Markdown` gained `wide`;
+`ui/types.ts` lost `TreeMarks`; five screens' breadcrumbs point the repository's
+name at the repository.
+
+**The sidebar tree was the load-bearing deletion.** It is what made the Tree
+screen carry a second copy of itself, and it is what made "remove the Files
+section" and "give the repository its own screen" the same piece of work. Phase
+9 is why it could go: ⌘K indexes every path in the repository from one request
+and opens any of them by name, which is what an expanding tree in 196px was
+approximating one directory at a time. The e2e suite lost a test that asserted
+the sidebar shared its listing with the main column, and gained one that asserts
+there is no sidebar tree on either screen it used to be on.
+
+### Decisions
+
+**A screen is about one object.** The Tree screen was about two: the directory
+in its listing, and the repository whose README sat under that listing and whose
+clone URLs sat above it. That is why it read differently at the root than three
+levels down, and why the repository's own address — the one you paste, link and
+arrive at from the home screen — answered "what is in this directory" when the
+question was "what is this". The split gives each one screen and leaves the tree
+with one job at every depth.
+
+**The root of the tree is `/tree/HEAD`, not `/`.** `treeHref(repo, null)` used
+to alias to the repository's front page, which was true when they were the same
+screen and is a lie now. Changing the one function fixed every caller: a verb
+that says *browse* goes to the tree, and a breadcrumb that names the repository
+goes to the repository. Both rules are stated in `nav/paths.ts`, which is the
+file that decides them.
+
+**The badge is the fifth destination, and the four items stay four.**
+ARCHITECTURE.md §2 is explicit that navigation is git's primitives, and a
+repository summary is not one of them — so it is not an item. It is the thing
+that already named the repository at the top of the sidebar and already linked
+there; it now takes the same `--sel` fill an item does when you are on it. The
+alternative was a fifth nav item that would have made the row of primitives
+mean two different kinds of thing.
+
+**The README is full width, and that is a deliberate exception.** Prose reads
+best at about 76 characters and `Markdown` still defaults to it everywhere else
+— but on a screen whose content *is* the README, a measure floating in the left
+third of a wide window reads as a rendering failure rather than as typography.
+So `wide` is a prop rather than a change to the component's default, and the
+Summary is its only caller.
+
+**The head commit is a sentence now.** It was two pills and a panel row —
+`0f1a2b3` and `Committed 8d` — which is the SHA and the age without the fact.
+On the Summary it is a line you can read: the SHA opens the commit, the headline
+says what landed, the author and age sit at the end. ARCHITECTURE.md §2 already
+said the repository's own HEAD commit is what a per-file last-commit column was
+approximating; this is the first screen that shows it as such.
+
+### Deliberately not done
+
+- **No fifth nav item.** See above.
+- **The tree's breadcrumb still points its repository name at the tree root**,
+  not at the Summary — inside a path, every crumb is a directory, and one that
+  silently left the tree would break walking up. The badge is the way out.
+- **The Summary does not list the last commit per top-level entry.**
+  ARCHITECTURE.md §2 rules that column out for costing a blame walk per row, and
+  it costs exactly the same here.
+- **No languages bar, no contributors, no topics.** They are the parts of a
+  GitHub repository page that are about the project as a product, and §1's
+  out-of-scope list is the contract.
+
+### Verification
+
+`bun run check` (0 errors), `bun run lint` and `bun run build` all pass.
+`npx playwright test` — 102 passed.
+
+The suite moved rather than grew: `openRepo` now means the Tree screen and
+`openSummary` means the repository, and the tests that were really about the
+README, the clone strip or the blob cache moved to the second. Three are new:
+
+- **a repository opens on what it is**, with the description, the head commit as
+  a line whose SHA opens the commit, the clone strip and no listing — from two
+  reads, the second of which is the one the Tree screen renders from, so walking
+  next door costs nothing;
+- **the badge is the way back**, and carries `aria-current` only when you are on
+  the Summary;
+- **the sidebar carries no second copy of the tree**, on the Tree screen or the
+  File screen, and the root listing is fetched once rather than twice.
+
+Both themes checked by screenshot at 1280px — the Summary with its README at
+full width, and the Tree screen reduced to its listing.
+
+Two palette tests were flaky before they were right, and the flake was worth
+reading rather than retrying: they asserted *positions* — the first row is
+selected, the second row is now — while the account's lists were still arriving
+from IndexedDB. The palette follows the row rather than the index by design, so
+a group landing above the cursor moves what is under it; the tests now wait for
+the lists to settle before talking about an nth row. A `--repeat-each=2` run
+also reproduced the pre-existing two-worker flake this file already records: two
+Phase 5 and Phase 8 tests timing out at five seconds waiting for a first paint,
+on a loaded machine, both passing repeatedly in isolation and in every
+single-worker run.
+
+---
+
 ## Carried forward
 
 Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
@@ -1942,7 +2258,10 @@ Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
   from a response, and a whole column depends on getting it the right way round;
   and now `Pull`, whose `mergeable`, `latestReviews` and repositioned-thread
   `line` are guesses about *behaviour* rather than about shape — the first three
-  of that kind in the project. **This is by a distance the largest single risk
+  of that kind in the project. Phase 9 adds the first REST read that is not a
+  diff: the recursive tree, handed a *commit* SHA where the endpoint is
+  documented in terms of trees, and whose `truncated` flag nothing has yet seen
+  set. **This is by a distance the largest single risk
   here**, and one afternoon with a token would retire most of it. It would also
   settle two-dot compare, which is the one thing standing between the Review
   screen's default view and an exact answer.
@@ -2021,14 +2340,21 @@ Things to resolve when their phase arrives, beyond `ARCHITECTURE.md` §12.
   under its two SHAs, so a fortnight of daily visits to a busy repository leaves
   a fortnight of ranges behind it. They are small next to a diff and the LRU
   ceiling covers them, but they are the first entries the cache accumulates
-  without anyone navigating.
-- **Nine pure modules have no tests of their own, and the list has got worse.**
+  without anyone navigating. Phase 9 adds a fifth: the path index is one entry
+  per repository per head commit, and on a large repository it is a megabyte of
+  strings — one entry, so the LRU count barely notices it, which is exactly the
+  case where a count is the wrong signal and the quota estimate is the right one.
+- **Eleven pure modules have no tests of their own, and the list has got worse.**
   The Markdown parser, the scanner, the graph, the patch parser, the shortlog,
-  `review/anchor.ts`, `source/checks.ts` and now `visits/owners.ts` and
-  `visits/reach.ts` are covered only through the screens that render them.
+  `review/anchor.ts`, `source/checks.ts`, `visits/owners.ts`, `visits/reach.ts`
+  and now `palette/grammar.ts` and `palette/rank.ts` are covered only through the
+  screens that render them.
   `visits/owners.ts` joins `anchor.ts` at the top of the list and for the same
   reason: **a wrong answer is invisible.** A `CODEOWNERS` pattern read too
   broadly is an indigo dot on somebody else's file, which looks exactly like a
   correct one, and the e2e test covers four rules out of a syntax with a dozen
   shapes. `reach.ts` is arithmetic with one edge worth pinning — a rename must
-  count once in the directories its two names share, not twice.
+  count once in the directories its two names share, not twice. `rank.ts` is the
+  new one of that kind: the e2e tests pin two queries against one fixture, and
+  what a ranker is actually judged on is the tenth query on a real repository,
+  where "wrong" means the file you wanted came second and nobody files a bug.

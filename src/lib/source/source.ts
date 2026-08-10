@@ -5,6 +5,7 @@ import { getCommit, type CommitDetail } from './commit';
 import { getCompare, type CompareResult } from './compare';
 import { getLog, type LogPage } from './log';
 import { getOwners, type OwnersFile } from './owners';
+import { getPaths, type PathIndex } from './paths';
 import { getPull, type PullDetail } from './pull';
 import { getPullFiles, type PullFilesPage } from './pull-files';
 import { getPulls, type PullFilter, type PullsPage } from './pulls';
@@ -128,6 +129,13 @@ export interface Source {
 	 * aliased expressions, no fan-out. What decides which paths are yours.
 	 */
 	getOwners(ref: RepoRef, rev: string): CacheQuery<OwnersFile>;
+
+	/**
+	 * Every path in the repository at a revision — the palette's file index.
+	 * One request rather than a query per directory, which is what lets a
+	 * repository be searched by path without breaking §7's fan-out rule.
+	 */
+	getPaths(ref: RepoRef, rev: string): CacheQuery<PathIndex>;
 
 	/**
 	 * One page of the repositories this token can see, most recently pushed
@@ -324,6 +332,18 @@ export const GitHubSource: Source = {
 			key: revKey('owners', ref, rev),
 			maxAge: FRESHNESS.owners,
 			run: (options) => getOwners(ref, rev, options).then(fromQuery)
+		};
+	},
+
+	getPaths(ref, rev) {
+		return {
+			// `revKey` as everywhere else, and it matters more here than anywhere:
+			// this is the largest single payload in the app, so the palette resolves
+			// a revision to its commit before asking, and the answer lands in the
+			// permanent store rather than on a window.
+			key: revKey('paths', ref, rev),
+			maxAge: FRESHNESS.paths,
+			run: (options) => getPaths(ref, rev, options)
 		};
 	},
 

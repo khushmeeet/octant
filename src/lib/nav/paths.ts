@@ -9,7 +9,7 @@ import { lineHash, type LineRange } from './lines';
  * state with routing.
  *
  *   /                                   your repositories, and what needs you
- *   /{owner}/{name}                     tree at the default branch, root
+ *   /{owner}/{name}                     the repository itself: what it is, and its README
  *   /{owner}/{name}/tree/{rev}          tree at a revision, root
  *   /{owner}/{name}/tree/{rev}/{path}   tree at a revision, in a directory
  *   /{owner}/{name}/blob/{rev}/{path}   a file
@@ -149,6 +149,21 @@ export function parseHome(search?: URLSearchParams): HomeAddress {
 	return { view: VIEWS[search?.get('view') ?? ''] ?? 'pulls' };
 }
 
+/**
+ * **The repository itself — the Summary screen.** What this is, what just
+ * landed, and its README at full width.
+ *
+ * This used to be the tree, and the tree used to carry the README under its
+ * listing. Two things were wrong with that. A directory listing is what you
+ * want when you know where you are going, and prose is what you want when you
+ * do not — stacking them meant the answer to "what is this repository" was
+ * below four thousand rows of answer to a question you had not asked. And the
+ * repository's own address is the one you paste, link and arrive at, so it
+ * should be about the repository rather than about one directory of it.
+ *
+ * So a breadcrumb that names the repository points here, and every verb that
+ * says *browse* points at `treeHref`.
+ */
 export function repoHref(repo: RepoRef): string {
 	return resolve('/[owner]/[name]', {
 		owner: segment(repo.owner),
@@ -157,13 +172,14 @@ export function repoHref(repo: RepoRef): string {
 }
 
 /**
+ * The tree, which is now a screen of its own at every depth including the root
+ * — `treeHref(repo, null)` is `/tree/HEAD`, not the repository's front page.
+ *
  * A revision of `null` addresses the default branch by omission rather than by
- * name — so a link to a repository's front page stays correct after its default
- * branch is renamed, and does not need the repository summary to be built.
+ * name — so a link stays correct after the default branch is renamed, and does
+ * not need the repository summary to be built first.
  */
 export function treeHref(repo: RepoRef, rev: string | null, path = ''): string {
-	if (rev === null && !path) return repoHref(repo);
-
 	return resolve('/[owner]/[name]/tree/[rev]/[...path]', {
 		owner: segment(repo.owner),
 		name: segment(repo.name),

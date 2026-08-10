@@ -1,6 +1,14 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { pullHref, pullsHref, treeHref, githubPullUrl, type PullsAddress } from '$lib/nav/paths';
+	import {
+		githubPullUrl,
+		homeHref,
+		pullHref,
+		pullsHref,
+		repoHref,
+		treeHref,
+		type PullsAddress
+	} from '$lib/nav/paths';
 	import {
 		ERROR_LABEL,
 		GitHubSource,
@@ -265,8 +273,8 @@
 	/* ------------------------------------------------------------- chrome -- */
 
 	const crumbs = $derived.by<Crumb[]>(() => [
-		{ label: repo.owner },
-		{ label: repo.name, href: treeHref(repo, null) },
+		{ label: repo.owner, href: homeHref() },
+		{ label: repo.name, href: repoHref(repo) },
 		{ label: 'pulls', href: pullsHref(repo) }
 	]);
 

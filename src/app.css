@@ -110,6 +110,8 @@
 	--radius-pill: 5px;
 	--radius-item: 5px;
 	--radius-card: 8px;
+	/* The palette, and nothing else. DESIGN.md §8: no rounded corner above 10px. */
+	--radius-overlay: 10px;
 	--icon: 14px;
 
 	--font-ui: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;

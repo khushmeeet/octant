@@ -1,10 +1,9 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import Markdown from '$lib/md/Markdown.svelte';
 	import {
 		archiveUrl,
 		fileHref,
-		githubBlobUrl,
+		homeHref,
 		parentPath,
 		treeHref,
 		type TreeAddress
@@ -12,9 +11,7 @@
 	import { ERROR_LABEL, GitHubSource, type TreeEntry } from '$lib/source';
 	import { prefetch } from '$lib/sync/prefetch';
 	import { resource } from '$lib/sync/resource.svelte';
-	import CloneStrip from '$lib/ui/CloneStrip.svelte';
 	import Dot from '$lib/ui/Dot.svelte';
-	import FileTree from '$lib/ui/FileTree.svelte';
 	import Header from '$lib/ui/Header.svelte';
 	import Icon from '$lib/ui/Icon.svelte';
 	import Pill from '$lib/ui/Pill.svelte';
@@ -36,10 +33,18 @@
 	 * name of a branch we were about to ask GitHub about anyway would be a
 	 * waterfall for no information (ARCHITECTURE.md §4).
 	 *
-	 * The README is a third read, deliberately behind the listing. It is
-	 * addressed by the blob's own object ID, which the listing already carries,
-	 * so it is permanent and shared across every revision where the file did not
-	 * change — and it is below the fold, so arriving a beat later costs nothing.
+	 * **This screen is about a directory, and only about one.** It used to be the
+	 * repository's front page as well, and carried three things that were about
+	 * the repository rather than about the directory on screen: the clone strip,
+	 * the README under the listing, and a second copy of the tree in the sidebar.
+	 * The first two moved to the Summary screen, which is what the repository's
+	 * own address renders now. The third was deleted outright — Phase 9's palette
+	 * opens any file in the repository by name, from an index of every path,
+	 * which is what a sidebar tree was a slower approximation of.
+	 *
+	 * What is left is one listing, at one revision, at one path. The root is
+	 * `/tree/HEAD` rather than `/`, so the address says which of the two screens
+	 * you are on.
 	 */
 	interface Props {
 		address: TreeAddress;
@@ -59,17 +64,6 @@
 	const summary = resource(() => GitHubSource.getRepo(repo));
 	const tree = resource(() => GitHubSource.getTree(repo, rev, path));
 
-	/* ------------------------------------------------------------- readme -- */
-
-	const README = /^readme(\.(md|markdown|mdx|rst|txt|adoc))?$/i;
-	const MARKDOWN = /\.(md|markdown|mdx)$/i;
-
-	const readmeEntry = $derived(
-		tree.data?.entries.find((entry) => entry.type === 'blob' && README.test(entry.name)) ?? null
-	);
-
-	const readme = resource(() => (readmeEntry ? GitHubSource.getBlob(repo, readmeEntry.oid) : null));
-
 	/* -------------------------------------------------------------- since -- */
 
 	/**
@@ -83,10 +77,6 @@
 		rev,
 		head: summary.data?.head?.oid ?? null
 	}));
-
-	const marks = $derived({
-		mark: (path: string) => since.mark(path)
-	});
 
 	/* --------------------------------------------------------------- rows -- */
 
@@ -214,9 +204,10 @@
 
 	/**
 	 * `Files` and `Readme` used to lead this list, scrolling the page to one of
-	 * its two sections. They went with the verb row: both sections are on the
-	 * screen you are already on, a scroll away, and a jump link to something
-	 * visible is chrome pretending to be navigation.
+	 * the screen's two sections. They went with the verb row, and then the
+	 * README they pointed at went to the Summary screen — a jump link to
+	 * something visible was chrome pretending to be navigation, and the section
+	 * it jumped to was never about this directory in the first place.
 	 *
 	 * `Permalink` and `Copy path` went the same way, and for the same reason.
 	 * The tree is the screen you land on, and neither verb is about the tree:
@@ -240,7 +231,7 @@
 
 	const crumbs = $derived.by<Crumb[]>(() => {
 		const list: Crumb[] = [
-			{ label: repo.owner },
+			{ label: repo.owner, href: homeHref() },
 			{ label: repo.name, href: treeHref(repo, address.rev, '') }
 		];
 
@@ -304,15 +295,17 @@
 <svelte:window onkeydown={onKeydown} />
 
 {#snippet sidebar()}
+	<!-- No contextual section. The tree used to render a second copy of itself
+	     here, and Phase 9's palette is what finally made it redundant: ⌘K opens
+	     any file in the repository by name, from an index of every path, which is
+	     what a sidebar tree was an approximation of. -->
 	<Sidebar
 		repo={summary.data}
 		active="tree"
 		rev={address.rev}
 		treeCount={tree.data?.entries.length ?? null}
-		section="Files"
-	>
-		<FileTree {repo} {rev} hrefRev={address.rev} current={path} {marks} />
-	</Sidebar>
+		section={null}
+	/>
 {/snippet}
 
 {#snippet pills()}
@@ -333,10 +326,6 @@
 {/snippet}
 
 <Shell {sidebar} {header} {panel}>
-	{#if summary.data && !path}
-		<CloneStrip https={summary.data.cloneUrl} ssh={summary.data.sshUrl} />
-	{/if}
-
 	{#if failure && !tree.data}
 		<p class="fail" role="alert">
 			<b>{ERROR_LABEL[failure.kind]}</b>{failure.message}
@@ -445,33 +434,6 @@
 				{/snippet}
 			</VirtualRows>
 		</nav>
-
-		{#if readmeEntry}
-			<section class="readme">
-				<h2 class="mono">{readmeEntry.name}</h2>
-				{#if readme.data?.text !== null && readme.data?.text !== undefined}
-					{#if MARKDOWN.test(readmeEntry.name)}
-						<Markdown source={readme.data.text} base={{ repo, rev, dir: path }} />
-					{:else}
-						<pre class="plain mono">{readme.data.text}</pre>
-					{/if}
-					{#if readme.data.isTruncated}
-						<p class="note">
-							GitHub sent a prefix of this file, not all of it.
-							<a
-								href={githubBlobUrl(repo, rev, readmeEntry.path)}
-								target="_blank"
-								rel="noopener noreferrer">Read it on github.com</a
-							>.
-						</p>
-					{/if}
-				{:else if readme.error}
-					<p class="note">{readme.error.message}</p>
-				{:else if readme.data}
-					<p class="note">This file is binary, or too large for the API to send.</p>
-				{/if}
-			</section>
-		{/if}
 	{/if}
 </Shell>
 
@@ -633,36 +595,6 @@
 	.none b {
 		color: var(--tx2);
 		font-weight: 500;
-	}
-
-	.readme {
-		padding: 18px var(--pad-main) 40px;
-	}
-
-	.readme h2 {
-		font-size: 11.5px;
-		font-weight: 400;
-		color: var(--tx3);
-		margin: 0 0 14px;
-	}
-
-	.plain {
-		margin: 0;
-		font-size: 12px;
-		line-height: 1.6;
-		color: var(--tx2);
-		white-space: pre-wrap;
-		max-width: 76ch;
-	}
-
-	.note {
-		margin: 10px 0 0;
-		font-size: 12px;
-		color: var(--tx3);
-	}
-
-	.note a {
-		color: var(--acc-tx);
 	}
 
 	.fail,

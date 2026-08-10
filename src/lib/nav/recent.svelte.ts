@@ -13,8 +13,10 @@ import { META, STORE } from '$lib/store/schema';
  * It had a screen of its own until the home screen replaced it, and it does not
  * need one back: `sync/tick.ts` reads the top three as the pinned set
  * (ARCHITECTURE.md §12), and what you can open is now a list from GitHub rather
- * than a list of where you have been. PLAN.md Phase 9 wants it again as a
- * palette result group, which is the next thing that will read it.
+ * than a list of where you have been. Phase 9 is the second reader and the one
+ * this list was really for — the palette's `Recent` group, which is what an
+ * empty query answers with: where you were is a better guess than anything a
+ * ranker could make about a list of fifty repositories.
  */
 
 export interface RecentRepo extends RepoRef {

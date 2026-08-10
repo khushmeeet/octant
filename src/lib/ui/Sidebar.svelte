@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { session } from '$lib/auth/token.svelte';
-	import { logHref, pullsHref, refsHref, repoHref } from '$lib/nav/paths';
+	import { logHref, pullsHref, refsHref, repoHref, treeHref } from '$lib/nav/paths';
 	import type { RepoSummary } from '$lib/source';
 	import Icon from './Icon.svelte';
 	import { count } from './format';
@@ -23,12 +23,21 @@
 	 * component used to render there. A screen that is not about a repository
 	 * supplies its own two, and everything else about the geography is unchanged:
 	 * badge, items with counts, contextual section, account.
+	 *
+	 * **The badge is the fifth destination and is not an item.** The Summary
+	 * screen is the repository itself rather than one of git's primitives, so it
+	 * belongs to the thing that names the repository — the badge — which was
+	 * already a link to that address and now lights up when you are on it. Four
+	 * items stays four.
 	 */
 	export type NavId = 'tree' | 'log' | 'refs' | 'review';
 
 	interface Props {
 		repo?: RepoSummary | null;
-		/** The nav item you are looking at. One of `NavId`, or a screen's own. */
+		/**
+		 * The nav item you are looking at. One of `NavId`, a screen's own, or
+		 * `summary` — which matches no item and lights the badge instead.
+		 */
 		active?: string;
 		/** Overrides the repository badge. For a screen that has no repository. */
 		head?: NavHead | null;
@@ -96,7 +105,9 @@
 			label: 'Tree',
 			icon: 'code',
 			count: treeCount,
-			href: repo ? repoHref(repo) : null
+			// `/tree/HEAD`, not the repository's front page: that address belongs to
+			// the Summary now, and the badge above is what points at it.
+			href: repo ? treeHref(repo, rev, '') : null
 		},
 		{
 			id: 'log',
@@ -136,7 +147,15 @@
 
 <nav class="sb" aria-label="Primary">
 	{#if badge?.href}
-		<a class="org" href={badge.href}>
+		<!-- The badge is a destination as well as a label: it is the repository's
+		     own screen. It lights up there the way a nav item does on its own,
+		     because a link you are already on should say so. -->
+		<a
+			class="org"
+			class:on={active === 'summary'}
+			href={badge.href}
+			aria-current={active === 'summary' ? 'page' : undefined}
+		>
 			<span class="av" aria-hidden="true">{badge.initial}</span>
 			<span class="orgname" title={badge.title ?? badge.label}>{badge.label}</span>
 		</a>
@@ -213,6 +232,15 @@
 		font-weight: 500;
 		min-width: 0;
 		flex: none;
+	}
+
+	/* The same selected fill a nav item takes, minus the bottom padding that
+	   separates the badge from them — so the highlight is the badge's own box. */
+	a.org.on {
+		background: var(--sel);
+		border-radius: var(--radius-item);
+		padding-bottom: 5px;
+		margin-bottom: 5px;
 	}
 
 	.orgname {

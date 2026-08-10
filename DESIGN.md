@@ -141,8 +141,16 @@ repository browser is a dense list and the rows are worth more than the border.
 
 **Sidebar** — org badge (18px, 5px radius, accent fill) then four nav items:
 Tree, Log, Refs, Review, each with a count on the right. Below, a contextual
-section whose heading changes per screen (`Files`, `Symbols`, `Scope`,
-`Threads`) — and which is absent, heading and all, on a screen that has none.
+section whose heading changes per screen (`Scope`, `Threads`, and a commit's
+`Files`) — and which is absent, heading and all, on a screen that has none,
+which is now most of them.
+
+The badge is a destination as well as a label: it is the repository's own
+screen, the Summary, and it takes the same `--sel` fill a nav item takes when
+you are on it. Tree and File used to carry an expanding copy of the repository's
+tree under a `Files` heading; it is gone. ⌘K opens any path in the repository by
+name, which is what a tree in 196px was a slower way to do, and the space is
+worth more as quiet.
 
 The home screen is the one place the four are replaced rather than filled in:
 git's primitives are questions about a repository, and above one they have
@@ -162,6 +170,9 @@ than a result. With no row selected the header carries pills and no verbs:
 there is no object to carry them.
 
 **Header** — breadcrumb left; the object's group and then the chrome, right.
+Every segment of the breadcrumb is a link to the thing it names, including the
+first: the owner goes to the home screen, which is the only screen that is about
+the account — there are no owner or organisation pages to send it to.
 The object's group is its pills (ref, HEAD SHA, state — `Open`, `1 check
 failing`) followed by its verbs as text buttons and the copy/utility verb
 last; it scrolls rather than pushing anything off the end. The chrome is ⌘K,
@@ -174,7 +185,14 @@ there. They had a 32px row of their own until it was cut: it repeated the
 object's name from the breadcrumb and pushed every screen's content a line
 down for verbs that fit next to the pills.
 
-**Clone strip** — Tree screen only. Two labelled URLs, `read-only` and
+**Summary** — the repository's own screen, and where it opens. Description at
+13px, then one line for the head commit — SHA in accent mono, headline, author
+and age right-aligned — then the clone strip, all above a hairline. Below it the
+README, **at the full width of the main column**: here the prose is the screen
+rather than a note under a listing, and the 76-character measure that reads best
+beside something else reads as unfinished with nothing beside it.
+
+**Clone strip** — Summary screen only. Two labelled URLs, `read-only` and
 `read/write`, in mono at 11.5px.
 
 **Row** — 32px, flex, hover and selected states. Composition varies by
@@ -216,6 +234,16 @@ height, so lanes meet where the rows do.
 **Palette** — centred overlay, `min(540px, 90%)`, 10px radius, shadow
 `0 16px 48px rgba(0,0,0,.45)`, scrim at 50% black. Query row, grouped
 results, footer showing the prefix grammar and index size.
+
+Rows are the standard 32px and carry an icon, the matched text, a secondary
+field and a trailing note. **The characters you typed are emphasised by weight,
+never by colour** — every colour here already means exactly one thing (§3), and
+"this is why the row matched" is not one of them. Group headings are the same
+11px tertiary label the right panel's blocks use, and the groups never reorder:
+they filter in place, so the geography of an answer is learned once. There is no
+separate hover state — moving the pointer moves the cursor — so exactly one row
+is ever highlighted, and it is always the one `enter` will open. The query row
+names the repository the grammar is scoped to, tertiary and right-aligned.
 
 ---
 

@@ -239,6 +239,47 @@ export function compare(
 	);
 }
 
+/* ---------------------------------------------------------------- trees -- */
+
+/** One entry of a recursive tree read, as GitHub sends it. */
+export interface GitTreeEntry {
+	path: string;
+	mode: string;
+	/** `commit` is a submodule — a pointer into another repository. */
+	type: 'blob' | 'tree' | 'commit';
+	sha: string;
+	size?: number;
+}
+
+export interface GitTree {
+	sha: string;
+	tree: GitTreeEntry[] | null;
+	/** GitHub stopped short: past 100,000 entries, or 7 MB of them. */
+	truncated: boolean;
+}
+
+/**
+ * **Every path in the repository, in one request** — the palette's file index.
+ *
+ * REST rather than GraphQL because GraphQL has no recursive tree: asking it the
+ * same question is a query per directory, which is precisely the fan-out
+ * ARCHITECTURE.md §7 rules out. This is the opposite shape — one bounded request
+ * whose size is the repository's, and which GitHub itself caps and flags with
+ * `truncated` rather than silently shortening.
+ *
+ * The `rev` may be a commit SHA, a branch or a tag; git resolves any of them to
+ * a root tree. A SHA is what makes the answer permanent, so the palette resolves
+ * one before asking wherever it can.
+ */
+export function gitTree(
+	repo: RepoRef,
+	rev: string,
+	options: RestOptions = {}
+): Promise<RestResult<GitTree>> {
+	const path = `/repos/${encodeRef(repo.owner)}/${encodeRef(repo.name)}/git/trees/${encodeRef(rev)}?recursive=1`;
+	return restGet<GitTree>(path, options);
+}
+
 /** Per-file patches for a pull request. Paginated; 100 is the maximum page. */
 export function pullFiles(
 	repo: RepoRef,

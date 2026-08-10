@@ -76,6 +76,14 @@ export const FRESHNESS = {
 	/** Check runs, while CI is moving. */
 	checks: 15_000,
 	/**
+	 * The palette's path index, at a branch. Long, because it is the largest
+	 * single payload the app fetches and what it answers — *does this repository
+	 * contain a file called this* — moves far more slowly than the file contents
+	 * do. At a commit SHA, which is how the palette asks for it wherever the head
+	 * is known, it is immutable and this is never consulted.
+	 */
+	paths: 600_000,
+	/**
 	 * `CODEOWNERS`, at a branch. By far the longest window in the app, because
 	 * the file changes when a team reorganises rather than when someone pushes —
 	 * and because every screen consults it, so a short window would make a rarely

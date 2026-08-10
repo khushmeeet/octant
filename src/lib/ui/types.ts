@@ -32,16 +32,6 @@ export interface Verb {
 }
 
 /**
- * What a list needs in order to dot its rows — Phase 8.
- *
- * A function rather than a set, so the caller keeps the index and the list
- * keeps none of it. `null` is the common answer and costs a lookup.
- */
-export interface TreeMarks {
-	mark(path: string): { owned: boolean; title: string } | null;
-}
-
-/**
  * The badge at the top of the sidebar: what the navigation below it is the
  * navigation *of*. Normally the repository, and on the home screen the account.
  */

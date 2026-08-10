@@ -3,6 +3,7 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import TokenGate from '$lib/auth/TokenGate.svelte';
 	import { session } from '$lib/auth/token.svelte';
+	import Palette from '$lib/palette/Palette.svelte';
 	import { startTick } from '$lib/sync/tick';
 	import { panel } from '$lib/ui/panel.svelte';
 	import { theme } from '$lib/ui/theme.svelte';
@@ -39,6 +40,9 @@
 	<TokenGate />
 {:else}
 	{@render children()}
+	<!-- Above every screen and outside all of them: ⌘K is the app's shortcut,
+	     not a screen's — PLAN.md Phase 9. -->
+	<Palette />
 {/if}
 
 <style>

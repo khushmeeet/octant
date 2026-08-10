@@ -15,9 +15,16 @@
 	interface Props {
 		source: string;
 		base?: { repo: RepoRef; rev: string; dir: string };
+		/**
+		 * Let the prose take the column it is given rather than the 76 characters
+		 * that read best. The Summary screen asks for it: there the README *is*
+		 * the screen rather than a note under a listing, and a measure of text
+		 * floating in the left third of a wide window reads as unfinished.
+		 */
+		wide?: boolean;
 	}
 
-	let { source, base }: Props = $props();
+	let { source, base, wide = false }: Props = $props();
 
 	const blocks = $derived(parseMarkdown(source));
 
@@ -47,7 +54,7 @@
 	}
 </script>
 
-<div class="md">
+<div class="md" class:wide>
 	<MdBlocks {blocks} {resolve} />
 </div>
 
@@ -56,5 +63,9 @@
 		font-size: 13px;
 		line-height: 1.6;
 		max-width: 76ch;
+	}
+
+	.md.wide {
+		max-width: none;
 	}
 </style>

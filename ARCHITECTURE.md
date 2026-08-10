@@ -16,7 +16,8 @@ outside the scope below links out.
 | Surface | Answers                                    |
 | ------- | ------------------------------------------ |
 | Home    | What needs me, and which repositories are there? |
-| Tree    | What is this repo, and what just landed?   |
+| Summary | What is this repository, and what just landed? |
+| Tree    | What is in this directory?                 |
 | Log     | What changed, how big, by whom?            |
 | File    | Who wrote this line and why?               |
 | Refs    | What has shipped, and what's in flight?    |
@@ -61,7 +62,16 @@ here; the specification — tokens, metrics, component inventory — lives in
 
 **Navigation is git's primitives, not GitHub's product surface.**
 Four items: Tree, Log, Refs, Review. Branches and tags are the same object,
-so they share one screen.
+so they share one screen. The repository *itself* is the fifth destination and
+is deliberately not a fifth item: it is the badge above them, which already
+named the repository and now goes to it.
+
+**A screen is about one object.** The Tree screen was two — a directory, and
+the repository whose README and clone URLs it carried under and beside that
+directory's listing. Splitting them gave the repository its own address, which
+is the one people paste and arrive at, and left the tree with one job. The
+sidebar's copy of the tree went at the same time: the palette indexes every path
+in the repository, so a tree in 196px was a slower way to ask the same question.
 
 **Every object carries its own verbs.** The header exposes the current
 object's actions inline, beside the pills that identify it — on a file:
@@ -130,6 +140,7 @@ what powers "since your last review" without us storing a single blob.
 | ----------------- | ----------------------------------------------------------------------------------------------------------------- |
 | Home, repos       | GraphQL `viewer.repositories(orderBy: PUSHED_AT)`, each with `pullRequests(states: OPEN).totalCount`              |
 | Home, in flight   | GraphQL `search(type: ISSUE)` twice — `author:@me` and `review-requested:@me`, merged by repository and number    |
+| Summary           | The repository query, the root listing, and the README's blob by object ID — three reads, none of them new       |
 | Tree              | GraphQL `repository.object(expression: "REF:path")` → `Tree.entries` with `name`, `type`, `mode`, `Blob.byteSize` |
 | File contents     | GraphQL `Blob.text`; fall back to `raw.githubusercontent.com` for large or binary blobs                           |
 | Blame             | GraphQL `Commit.blame(path:)` → ranges with their commits                                                         |
@@ -138,6 +149,7 @@ what powers "since your last review" without us storing a single blob.
 | Review            | GraphQL `pullRequest` — reviews, `reviewThreads` with line positions, comments, check runs                        |
 | Diff              | REST compare `base...head`, and the PR files endpoint's per-file `patch`                                          |
 | Since last review | REST compare `storedHeadSha...currentHeadSha`                                                                     |
+| Palette, paths    | REST `git/trees/{commit}?recursive=1` — every path in one request, filed under the commit                          |
 | Symbols (palette) | Deferred — see §9                                                                                                 |
 
 One query per screen. Queries are shaped to the screen, not to the domain
@@ -267,8 +279,11 @@ even though there is only one implementation of each.
 **`Source`** — where data comes from. `getRepo`, `getTree`, `getBlob`,
 `getLog`, `getBlame`, `getRefs`, `getPulls`, `getDiff`, `compare` — and, for
 the home screen, `getViewerRepos` and `getViewerPulls`, the only two that name
-an account rather than a repository. Implemented by `GitHubSource`. A future
-`LocalSource` backed by a git sidecar would satisfy the same interface.
+an account rather than a repository. `getPaths` is the palette's, and the only
+read whose answer is a whole repository at once: one recursive tree request
+rather than the query-per-directory that §7 forbids. Implemented by
+`GitHubSource`. A future `LocalSource` backed by a git sidecar would satisfy the
+same interface.
 
 **`Store`** — where data is kept. `get`, `put`, `evict`, plus the visit
 methods. Implemented by `IdbStore`. A future SQLite-backed store swaps in
@@ -283,6 +298,8 @@ GitHub.
 src/lib/
   auth/         token provider, validation, entry gate
   home/         the arrival screen: your repositories, and what needs you
+  palette/      ⌘K: the grammar, the ranking, and the overlay
+                (its open/close state is chrome, and lives in ui/)
   source/       Source interface, GitHubSource, GraphQL documents
   store/        Store interface, IdbStore, schema + migrations
   sync/         revalidation ticks, rate-limit accounting, prefetch
@@ -318,6 +335,7 @@ Accepted, with the mitigation or the deferral noted.
 | Limit                           | Consequence                                | Response                                                                                      |
 | ------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------- |
 | No local symbol index           | Palette ranks files and paths, not symbols | Defer. Optionally use GitHub code search (default branch only, separate limit, indexing lag). |
+| Recursive tree cap              | A repository past 100,000 entries or 7MB indexes partially | GitHub flags `truncated`; the palette's footer says `partial` rather than quietly missing files. |
 | No `git log -L`                 | "History of this symbol" cannot ship       | Cut from v1. Needs a local git sidecar.                                                       |
 | No webhooks                     | No push freshness                          | Poll while the app is open; ETags make it cheap.                                              |
 | Patch truncation on large diffs | Very large PRs degrade                     | Detect truncation, show it honestly, link out.                                                |
@@ -331,8 +349,10 @@ Accepted, with the mitigation or the deferral noted.
 
 - Does GitHub's SPA client support for GitHub Apps ship what §8 describes?
   Determines whether OAuth needs an edge function at all.
-- Does the file tree persist across navigation, or is it contextual per
-  screen? Currently contextual — worth testing both.
+- ~~Does the file tree persist across navigation, or is it contextual per
+  screen?~~ Answered by deleting it. The palette opens any path in the
+  repository by name from a single index, which is what the sidebar tree was
+  approximating one directory at a time.
 - How many repos should sync in the background? Unbounded polling will hit
   the rate limit; a pinned set is probably right.
 - Should review comments be writable in v1, or is this strictly read-only

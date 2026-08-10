@@ -6,9 +6,11 @@
 		compareHref,
 		fileHref,
 		githubPullUrl,
+		homeHref,
 		parseFileAnchor,
 		pullHref,
 		pullsHref,
+		repoHref,
 		treeHref,
 		type PullAddress,
 		type PullView
@@ -372,8 +374,8 @@
 	});
 
 	const crumbs = $derived.by<Crumb[]>(() => [
-		{ label: repo.owner },
-		{ label: repo.name, href: treeHref(repo, null) },
+		{ label: repo.owner, href: homeHref() },
+		{ label: repo.name, href: repoHref(repo) },
 		{ label: 'pulls', href: pullsHref(repo) },
 		{ label: `#${number}`, mono: true }
 	]);
