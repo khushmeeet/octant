@@ -397,7 +397,17 @@ const RENAMED_IMPORT_PATCH = [
 	' <script>',
 	"-	import { tidy } from './tidier.js';",
 	"+	import { tidy } from './tidy.js';",
-	' </script>'
+	' </script>',
+	// And the case that pairing line against line cannot read: one line becomes
+	// three because a clause was appended and the paragraph rewrapped. Nothing
+	// was removed, and most of the new text is on lines the removal never met.
+	'@@ -20,3 +20,5 @@',
+	' <!-- notes -->',
+	'-A short note about the tidier, and nothing else.',
+	'+A short note about the tidier, and nothing else — plus a clause',
+	'+  that was long enough to wrap onto a second line, which is',
+	'+  where the old pairing lost it.',
+	' <!-- end -->'
 ].join('\n');
 
 /** Past any sane render budget, which is the point. */
@@ -455,8 +465,8 @@ const PATCHES: Record<number, DiffFileStub[]> = {
 		{
 			filename: 'src/App.svelte',
 			status: 'modified',
-			additions: 1,
-			deletions: 1,
+			additions: 4,
+			deletions: 2,
 			patch: RENAMED_IMPORT_PATCH
 		}
 	]
@@ -4331,16 +4341,43 @@ test('a replaced line says which words changed, not merely that it changed', asy
 
 	await expect(page.getByRole('heading', { name: 'split the tidier out' })).toBeVisible();
 
-	// One removal, one addition, and the sign column still says which is which.
 	const removed = page.locator('.lrow.del');
 	const added = page.locator('.lrow.add');
-	await expect(removed.locator('.sign')).toHaveText('−');
-	await expect(added.locator('.sign')).toHaveText('+');
+	await expect(removed.first().locator('.sign')).toHaveText('−');
+	await expect(added.first().locator('.sign')).toHaveText('+');
 
 	// The whole point: the emphasis is the module that was renamed, not the
-	// thirty characters either side of it that did not move.
-	await expect(removed.locator('.w')).toHaveText('tidier');
-	await expect(added.locator('.w')).toHaveText('tidy');
+	// thirty characters either side of it that did not move. Character-level
+	// finds it — the two names share `tid` and a suffix — and the span is grown
+	// to the word, because a highlight starting three characters into a name is
+	// confetti.
+	await expect(removed.first().locator('.w')).toHaveText('tidier');
+	await expect(added.first().locator('.w')).toHaveText('tidy');
+});
+
+test('a rewrapped paragraph marks what was appended, not where the wrap fell', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/sveltejs/svelte/commit/${sha(100)}`);
+	await expect(page.getByRole('heading', { name: 'split the tidier out' })).toBeVisible();
+
+	const removed = page.locator('.lrow.del');
+	const added = page.locator('.lrow.add');
+	await expect(removed).toHaveCount(2);
+	await expect(added).toHaveCount(4);
+
+	// One line became three. Nothing was taken out of it, so the removed row
+	// carries the tint and no emphasis at all — pairing it against the first of
+	// the three used to light up whatever coincided at the end instead.
+	await expect(removed.nth(1)).toContainText('and nothing else.');
+	await expect(removed.nth(1).locator('.w')).toHaveCount(0);
+
+	// The clause that was appended, on the line it was appended to.
+	await expect(added.nth(1).locator('.w')).toHaveText('— plus a clause');
+
+	// And the two lines the rewrap pushed the rest onto are wholly new, so the
+	// row tint has already said it. A second colour over all of it says nothing.
+	await expect(added.nth(2).locator('.w')).toHaveCount(0);
+	await expect(added.nth(3).locator('.w')).toHaveCount(0);
 });
 
 test('a line with no counterpart is marked whole, and a moved one not at all', async ({ page }) => {

@@ -238,13 +238,24 @@ hunk headers on `--side` carrying the "pushes since you reviewed" count.
 
 The tint runs the **whole** row — line numbers, sign and source — because a
 sign is one character in a 14px column and reading a diff by it means reading
-every line to find the handful that moved. Where a removed line has a
-counterpart on the other side, the runs of text that actually differ take a
-second layer of the same colour, at `--ok-word` / `--no-word`. That is the
-difference between "this line changed" and "this word changed", and it is the
-whole reason to open a diff at all. A refinement is never a claim: an unpaired
-line, a line that came back unchanged, and a pair too unalike to be versions of
-each other are all left with the row tint and nothing more.
+every line to find the handful that moved. Inside a replaced block, the runs of
+text that actually differ take a second layer of the same colour, at
+`--ok-word` / `--no-word`. That is the difference between "this line changed"
+and "this word changed", and it is the whole reason to open a diff at all.
+
+**Matching is character-level; the highlight is word-level.** Characters find
+the change — a transposition inside an identifier is invisible to anything
+coarser — and a span that lands inside a word is then grown to hold the whole
+word, because a highlight starting three characters into a name is confetti.
+The comparison is between whole *blocks*: every removed line joined against
+every added line, so a rewrapped paragraph or a statement split across two
+lines reads as text that moved rather than as three unrelated rows.
+
+A refinement is never a claim, and all four ways of having no answer produce
+the same one — the row tint and nothing more: a run of removals with no
+additions after it, text that came back unchanged, two blocks too unalike to be
+versions of each other, and a line covered end to end, which the row tint has
+already accounted for.
 
 **Merge bar** — Review screen, directly under the heading, the same 8px/14px
 band as the "since your last review" banner and filling the column rather than
@@ -337,8 +348,9 @@ rounded corners above 10px.
   only for non-essential meta, never for anything load-bearing.
 - Colour is never the sole carrier of meaning: diff rows have `+`/`−` signs,
   status pills have text, the change dot has a tooltip and a sidebar
-  equivalent. The word-level emphasis inside a row is the one thing carried by
-  colour alone, and it is allowed to be — it refines a distinction the sign
-  column has already made in text, and nothing is lost by not seeing it.
+  equivalent. The emphasis on the changed run inside a row is the one thing
+  carried by colour alone, and it is allowed to be — it refines a distinction
+  the sign column has already made in text, and nothing is lost by not seeing
+  it.
 - Focus is always visible; every verb-row action is reachable by tab.
 - Icons that carry meaning get labels; decorative ones are `aria-hidden`.
